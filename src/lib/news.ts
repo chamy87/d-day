@@ -17,6 +17,8 @@ export type NewsItem = {
   title: string;
   url: string | null;
   publishedAt: string | null;
+  /** Sleeper ids tagged at ingest time (empty when live-fetched). */
+  playerIds?: string[];
 };
 
 function pull(tag: string, xml: string): string | null {

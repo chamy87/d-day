@@ -30,5 +30,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "components", "ui_kits", "guidelines", "_ds_bundle.js"]
+  "exclude": ["node_modules", "components", "ui_kits", "guidelines", "proposals", "_ds_bundle.js"]
 }

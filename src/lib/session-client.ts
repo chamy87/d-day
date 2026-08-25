@@ -24,3 +24,25 @@ export function saveTeamPref(scope: string, value: string): void {
     body: JSON.stringify({ merge: { teams: { [scope]: value } } }),
   }).catch(() => {});
 }
+
+/** Draft queue (starred player ids), persisted like the team pref. */
+export async function loadQueuePref(scope: string): Promise<string[]> {
+  const local = localStorage.getItem(`dday:queue:${scope}`);
+  const fallback = local ? (JSON.parse(local) as string[]) : [];
+  try {
+    const res = await fetch("/api/session");
+    const d = (await res.json()) as { data?: { queues?: Record<string, string[]> } };
+    return d.data?.queues?.[scope] ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function saveQueuePref(scope: string, ids: string[]): void {
+  localStorage.setItem(`dday:queue:${scope}`, JSON.stringify(ids));
+  fetch("/api/session", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ merge: { queues: { [scope]: ids } } }),
+  }).catch(() => {});
+}

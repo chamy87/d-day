@@ -1,0 +1,127 @@
+<!-- @dsCard group="Proposals" viewport="1280x800" name="Draft Room v2" subtitle="UX proposal: team picker, snake strip, queue, expandable rows" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>D-Day — Draft Room v2 proposal</title>
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>html,body,#root{height:100%;margin:0}</style></head><body><div id="root"></div>
+<script type="text/babel">
+const {Card,Tag,Tabs,Switch,Toast,TierBreak,PlayerRow,PositionBadge,IconButton,Button,StatDelta}=window.DDayFantasyDesignSystem_0ed541;
+const TEAMS=[{id:1,n:'ChampsOnly'},{id:2,n:'Waiver Wire Warriors'},{id:3,n:'The Gridiron Gents'},{id:4,n:'BigDawgs'},{id:5,n:'Team Riley'},{id:6,n:'Bench Mob'},{id:7,n:'Hail Marys'},{id:8,n:'Couch GMs'},{id:9,n:'Red Zone Rebels'},{id:10,n:'Taco Corp'},{id:11,n:'Ice Cold Takes'},{id:12,n:'4th & Long'}];
+const BOARD=[
+ {t:1,players:[{r:7,n:'Bijan Robinson',p:'RB',tm:'ATL',b:5,v:62,d:3,proj:288,adp:4,fc:9840,news:'Cleared 100 scrimmage yards in 5 straight games.'},{r:8,n:'CeeDee Lamb',p:'WR',tm:'DAL',b:7,v:58,d:-2,proj:281,adp:6,fc:9310,news:'Full participant Wednesday; no injury designation.'}]},
+ {t:2,players:[{r:9,n:'Drake London',p:'WR',tm:'ATL',b:5,v:44,d:11,inj:'Q',proj:262,adp:20,fc:8020,news:'Limited with hip; expected to play per beat reporters.'},{r:10,n:'Josh Jacobs',p:'RB',tm:'GB',b:10,v:41,d:6,proj:255,adp:16,fc:7710,news:'Coaching staff signals 20+ touch role continues.'},{r:11,n:'Jayden Daniels',p:'QB',tm:'WAS',b:12,v:39,d:14,proj:340,adp:25,fc:8460,news:'Designed-run rate up again in camp scrimmages.'},{r:12,n:'Trey McBride',p:'TE',tm:'ARI',b:8,v:36,d:-4,proj:214,adp:8,fc:7150,news:'Saw a season-high 11 targets in final preseason tune-up.'}]},
+ {t:3,players:[{r:13,n:'DK Metcalf',p:'WR',tm:'PIT',b:5,v:28,d:2,proj:238,adp:15,fc:6120,news:'New QB chemistry trending up through August.'},{r:14,n:'Joe Burrow',p:'QB',tm:'CIN',b:10,v:27,d:8,proj:328,adp:22,fc:7980,news:'No limitations; full offseason program completed.'},{r:15,n:'James Cook',p:'RB',tm:'BUF',b:7,v:25,d:-6,proj:231,adp:9,fc:5890,news:'Ankle (Q) — game-time call in Week 1 unlikely to linger.'}]}
+];
+const NEXT_PICKS=[{no:31,rd:3},{no:32,rd:3},{no:33,rd:3},{no:34,rd:3},{no:35,rd:3},{no:36,rd:3},{no:37,rd:4},{no:38,rd:4},{no:39,rd:4},{no:40,rd:4},{no:41,rd:4},{no:42,rd:4},{no:43,rd:4},{no:44,rd:4}];
+const slotFor=(no,teams)=>{const rd=Math.ceil(no/teams),i=(no-1)%teams;return rd%2?i+1:teams-i};
+const initials=n=>n.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+function TeamPicker({onPick,onSkip}){
+  return <div style={{position:'fixed',inset:0,background:'rgba(11,14,17,.8)',backdropFilter:'blur(3px)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:100,padding:24}}>
+    <Card title="Which team is yours?" style={{width:640,maxWidth:'100%'}} action={<Button variant="ghost" size="sm" onClick={onSkip}>Just browsing</Button>}>
+      <div style={{fontSize:13,color:'var(--text-muted)',marginBottom:14}}>One tap — unlocks your roster, suggested picks and "you're up in N". Change it anytime from the header.</div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8}}>
+        {TEAMS.map(t=><button key={t.id} onClick={()=>onPick(t.id)} style={{display:'flex',alignItems:'center',gap:10,background:'var(--bg-1)',border:'1px solid var(--line-2)',borderRadius:'var(--radius-md)',padding:'10px 12px',cursor:'pointer',color:'var(--text-body)',fontFamily:'var(--font-body)',fontSize:13,textAlign:'left',minHeight:48,transition:'all var(--dur-fast)'}}
+          onMouseEnter={e=>{e.currentTarget.style.borderColor='var(--accent)';e.currentTarget.style.background='var(--accent-dim)'}}
+          onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--line-2)';e.currentTarget.style.background='var(--bg-1)'}}>
+          <span style={{width:28,height:28,borderRadius:'50%',background:'var(--bg-3)',display:'inline-flex',alignItems:'center',justifyContent:'center',fontFamily:'var(--font-mono)',fontSize:10,fontWeight:700,color:'var(--text-muted)',flexShrink:0}}>{initials(t.n)}</span>
+          <span style={{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.n}</span>
+          <span style={{fontFamily:'var(--font-mono)',fontSize:10,color:'var(--text-faint)'}}>#{t.id}</span>
+        </button>)}
+      </div>
+    </Card>
+  </div>;
+}
+function PickStrip({mySlot,currentNo}){
+  return <div style={{display:'flex',gap:6,alignItems:'center',padding:'8px 16px',borderBottom:'1px solid var(--line-1)',background:'var(--surface-panel)',overflowX:'auto'}}>
+    <span style={{fontSize:10,fontWeight:700,letterSpacing:'.08em',textTransform:'uppercase',color:'var(--text-faint)',flexShrink:0}}>Up next</span>
+    {NEXT_PICKS.map((p,i)=>{const slot=slotFor(p.no,12),team=TEAMS[slot-1],mine=slot===mySlot,current=p.no===currentNo,newRound=i>0&&p.rd!==NEXT_PICKS[i-1].rd;
+      return <React.Fragment key={p.no}>
+        {newRound&&<span style={{fontFamily:'var(--font-mono)',fontSize:9,color:'var(--text-faint)',flexShrink:0,padding:'0 2px'}}>R{p.rd} ⇄</span>}
+        <div title={team.n} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2,padding:'4px 8px',borderRadius:'var(--radius-sm)',flexShrink:0,minWidth:44,background:current?'var(--accent-dim)':mine?'transparent':'var(--bg-1)',border:'1px solid '+(current?'var(--accent)':mine?'rgba(255,180,61,.5)':'var(--line-1)'),animation:current?'dday-pulse 2s infinite':'none'}}>
+          <span style={{fontFamily:'var(--font-mono)',fontSize:11,fontWeight:700,color:current?'var(--accent)':mine?'var(--accent)':'var(--text-muted)'}}>{initials(team.n)}</span>
+          <span style={{fontFamily:'var(--font-mono)',fontSize:8,color:'var(--text-faint)'}}>{p.rd}.{String(((p.no-1)%12)+1).padStart(2,'0')}{mine?' · YOU':''}</span>
+        </div>
+      </React.Fragment>;})}
+  </div>;
+}
+function ExpandedDetail({p,queued,onQueue}){
+  return <div style={{padding:'10px 12px 14px 46px',borderBottom:'1px solid var(--line-1)',background:'var(--bg-1)'}}>
+    <div style={{display:'flex',gap:24,flexWrap:'wrap'}}>
+      {[['PROJ',p.proj+' pts'],['VBD','+'+p.v],['ADP',p.adp],['FC VALUE',p.fc.toLocaleString()],['BYE',p.b]].map(([l,v])=><div key={l}><div style={{fontFamily:'var(--font-mono)',fontSize:9,letterSpacing:'.08em',color:'var(--text-faint)'}}>{l}</div><div style={{fontFamily:'var(--font-mono)',fontSize:15,fontWeight:600}}>{v}</div></div>)}
+      <div style={{marginLeft:'auto',alignSelf:'center'}}><Button variant={queued?'secondary':'primary'} size="sm" onClick={e=>{e.stopPropagation();onQueue()}}>{queued?'★ Queued':'☆ Queue'}</Button></div>
+    </div>
+    <div style={{fontSize:12,color:'var(--text-muted)',marginTop:10}}><Tag tone="neutral" style={{marginRight:8}}>NEWS</Tag>{p.news}</div>
+  </div>;
+}
+function App(){
+  const [mySlot,setMySlot]=React.useState(null);
+  const [picked,setPicked]=React.useState(false);
+  const [pos,setPos]=React.useState('ALL');
+  const [hide,setHide]=React.useState(true);
+  const [queue,setQueue]=React.useState(['Jayden Daniels']);
+  const [open,setOpen]=React.useState(null);
+  const drafted=['Josh Jacobs'];
+  const toggleQ=n=>setQueue(q=>q.includes(n)?q.filter(x=>x!==n):[...q,n]);
+  const all=BOARD.flatMap(g=>g.players);
+  const rows=BOARD.map(g=>({...g,players:g.players.filter(pl=>(pos==='ALL'||pl.p===pos)&&!(hide&&drafted.includes(pl.n)))})).filter(g=>g.players.length);
+  return <div style={{display:'flex',flexDirection:'column',height:'100%'}}>
+    {!picked&&<TeamPicker onPick={id=>{setMySlot(id);setPicked(true)}} onSkip={()=>setPicked(true)}/>}
+    <header style={{display:'flex',alignItems:'center',gap:14,padding:'10px 16px',borderBottom:'1px solid var(--line-1)',background:'var(--surface-panel)'}}>
+      <span style={{fontFamily:'var(--font-display)',fontStretch:'125%',fontWeight:850,fontSize:20,letterSpacing:'-.02em'}}><span style={{color:'var(--accent)'}}>D-</span>DAY</span>
+      <span style={{fontSize:13,color:'var(--text-muted)'}}>The Gridiron Gentlemen</span>
+      <Tag>Half PPR</Tag><Tag>Superflex</Tag>
+      <span style={{flex:1}}></span>
+      <div style={{display:'flex',alignItems:'center',gap:10,background:'var(--accent-dim)',border:'1px solid rgba(255,180,61,.4)',borderRadius:'var(--radius-pill)',padding:'4px 14px',animation:'dday-pulse 2s infinite'}}>
+        <span style={{fontSize:10,fontWeight:700,letterSpacing:'.08em',textTransform:'uppercase',color:'var(--accent)'}}>On the clock</span>
+        <span style={{fontFamily:'var(--font-mono)',fontWeight:700,fontSize:18,color:'var(--accent)'}}>1:24</span>
+        <span style={{fontSize:11,color:'var(--text-muted)'}}>3.07 · Hail Marys{mySlot!=null&&' · you’re up in 2'}</span>
+      </div>
+      <Tabs size="sm" items={['BOARD','DASHBOARD']} value="BOARD" onChange={()=>{}}/>
+      {mySlot!=null&&<button onClick={()=>setPicked(false)} title="Change team" style={{display:'flex',alignItems:'center',gap:6,background:'transparent',border:'1px solid var(--line-2)',borderRadius:'var(--radius-pill)',padding:'3px 10px 3px 4px',cursor:'pointer',color:'var(--text-muted)',fontSize:11,fontFamily:'var(--font-body)'}}>
+        <span style={{width:20,height:20,borderRadius:'50%',background:'var(--bg-3)',display:'inline-flex',alignItems:'center',justifyContent:'center',fontFamily:'var(--font-mono)',fontSize:8,fontWeight:700}}>{initials(TEAMS[mySlot-1].n)}</span>
+        {TEAMS[mySlot-1].n}</button>}
+    </header>
+    <PickStrip mySlot={mySlot} currentNo={31}/>
+    <div style={{display:'flex',gap:14,padding:14,flex:1,minHeight:0,alignItems:'stretch'}}>
+      <Card title="Best available" pad={false} style={{flex:1,display:'flex',flexDirection:'column',minWidth:0}} action={<div style={{display:'flex',gap:10,alignItems:'center'}}><Tabs size="sm" items={['ALL','QB','RB','WR','TE']} value={pos} onChange={setPos}/><Switch checked={hide} onChange={setHide} label="Hide drafted"/></div>}>
+        <div style={{overflowY:'auto',flex:1}}>
+          {rows.map(g=><React.Fragment key={g.t}><TierBreak tier={g.t} note={g.players.length+' left'}/>
+            {g.players.map(pl=><React.Fragment key={pl.n}>
+              <PlayerRow rank={pl.r} name={pl.n} pos={pl.p} team={pl.tm} bye={pl.b} vbd={pl.v} adpDelta={pl.d} injury={pl.inj} drafted={drafted.includes(pl.n)} onClick={()=>setOpen(o=>o===pl.n?null:pl.n)}
+                trailing={<IconButton label={queue.includes(pl.n)?'Remove from queue':'Add to queue'} size="sm" active={queue.includes(pl.n)} onClick={e=>{e.stopPropagation();toggleQ(pl.n)}}><span style={{fontSize:14}}>{queue.includes(pl.n)?'★':'☆'}</span></IconButton>}/>
+              {open===pl.n&&<ExpandedDetail p={pl} queued={queue.includes(pl.n)} onQueue={()=>toggleQ(pl.n)}/>}
+            </React.Fragment>)}
+          </React.Fragment>)}
+        </div>
+      </Card>
+      <div style={{width:320,display:'flex',flexDirection:'column',gap:14,flexShrink:0,minHeight:0,overflowY:'auto'}}>
+        <Card title="My queue" pad={false} style={{flexShrink:0}} action={<span style={{fontFamily:'var(--font-mono)',fontSize:11,color:'var(--text-faint)'}}>{queue.length}</span>}>
+          {queue.length?queue.map((n,i)=>{const p=all.find(x=>x.n===n);const gone=drafted.includes(n);
+            return <div key={n} style={{display:'flex',alignItems:'center',gap:8,padding:'7px 12px',borderBottom:'1px solid var(--line-1)',opacity:gone?.4:1}}>
+              <span style={{fontFamily:'var(--font-mono)',fontSize:10,color:'var(--text-faint)',width:14}}>{i+1}</span>
+              <PositionBadge pos={p.p} size="sm"/>
+              <span style={{fontSize:13,flex:1,textDecoration:gone?'line-through':'none'}}>{n}</span>
+              {gone?<Tag tone="reach">SNIPED</Tag>:<span style={{fontFamily:'var(--font-mono)',fontSize:11,color:'var(--text-muted)'}}>+{p.v}</span>}
+              <IconButton label="Remove" size="sm" onClick={()=>toggleQ(n)}><span style={{fontSize:12}}>✕</span></IconButton>
+            </div>;}):<div style={{padding:'12px',fontSize:12,color:'var(--text-faint)'}}>Star players on the board to shortlist them here. Queued players auto-strike when drafted.</div>}
+        </Card>
+        <Card title="Suggested pick" glow style={{flexShrink:0}}>
+          <div style={{display:'flex',alignItems:'center',gap:8}}><PositionBadge pos="QB"/><span style={{fontWeight:700,fontSize:16}}>Jayden Daniels</span><Tag tone="value">VALUE +14</Tag></div>
+          <div style={{fontSize:12,color:'var(--text-muted)',marginTop:6}}><span style={{fontFamily:'var(--font-mono)'}}>+39 VBD · ADP 25</span> — superflex league and your SFLX slot is empty.</div>
+          <div style={{marginTop:10}}><Button variant="secondary" size="sm" onClick={()=>!queue.includes('Jayden Daniels')&&toggleQ('Jayden Daniels')}>{queue.includes('Jayden Daniels')?'★ In queue':'☆ Queue'}</Button></div>
+        </Card>
+        <Card title="My roster" pad={false} style={{flexShrink:0}}>
+          {[['QB','Joe Burrow — CIN'],['RB','Bijan Robinson — ATL'],['RB',null],['WR','Nico Collins — HOU'],['WR',null],['SFLX',null]].map(([slot,who],i)=>
+            <div key={i} style={{display:'flex',alignItems:'center',gap:10,padding:'7px 12px',borderBottom:'1px solid var(--line-1)'}}>
+              <PositionBadge pos={slot} size="sm"/>
+              {who?<span style={{fontSize:13}}>{who}</span>:<span style={{fontSize:13,color:'var(--text-faint)'}}>Empty{(slot==='RB'||slot==='SFLX')&&<Tag tone="warn" style={{marginLeft:8}}>NEED</Tag>}</span>}
+            </div>)}
+        </Card>
+      </div>
+    </div>
+  </div>;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script></body></html>

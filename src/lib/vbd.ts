@@ -24,6 +24,8 @@ export type Ranked = Projected & {
   vbd: number;
   tier: number;
   adpDelta: number | null;
+  /** FantasyCalc market value for the league shape (joined in buildBoard). */
+  fc?: number | null;
 };
 
 /** Projected points under this league's exact scoring_settings. */

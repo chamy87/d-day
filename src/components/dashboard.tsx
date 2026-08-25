@@ -15,6 +15,8 @@ import { Wordmark } from "@/components/wordmark";
 import { useIsMobile } from "@/lib/use-mobile";
 import { loadTeamPref, saveTeamPref } from "@/lib/session-client";
 import { AdvisorTab } from "@/components/advisor";
+import { TeamPickerModal, TeamChip } from "@/components/team-picker-modal";
+import { useRouter } from "next/navigation";
 import type { DashboardResponse, DashboardPlayer } from "@/app/api/league/[id]/dashboard/route";
 import type { Insight } from "@/app/api/league/[id]/insights/route";
 
@@ -66,15 +68,21 @@ function PlayerLine({ p, right }: { p: DashboardPlayer; right?: React.ReactNode 
 }
 
 export function Dashboard({ leagueId }: { leagueId: string }) {
+  const router = useRouter();
   const isMobile = useIsMobile();
   const [tab, setTab] = React.useState("START/SIT");
   const [week, setWeek] = React.useState<number | null>(null);
   const [myUserId, setMyUserId] = React.useState("");
+  const [prefsLoaded, setPrefsLoaded] = React.useState(false);
+  const [pickerOpen, setPickerOpen] = React.useState(false);
+  const [pickerDismissed, setPickerDismissed] = React.useState(false);
 
   React.useEffect(() => {
     let cancelled = false;
     loadTeamPref(leagueId).then((stored) => {
-      if (stored && !cancelled) setMyUserId(stored);
+      if (cancelled) return;
+      if (stored) setMyUserId(stored);
+      setPrefsLoaded(true);
     });
     return () => {
       cancelled = true;
@@ -83,6 +91,7 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
   const chooseTeam = (id: string) => {
     setMyUserId(id);
     saveTeamPref(leagueId, id);
+    setPickerOpen(false);
   };
 
   const dash = useQuery({
@@ -93,6 +102,9 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
 
   const data = dash.data;
   const myRoster = data?.rosters.find((r) => r.ownerId === myUserId) ?? null;
+  const myTeamLabel = data?.users.find((u) => u.userId === myUserId)
+    ? (data.users.find((u) => u.userId === myUserId)!.teamName ?? data.users.find((u) => u.userId === myUserId)!.name)
+    : null;
 
   const insights = useQuery({
     queryKey: ["insights", leagueId, data?.week, myRoster?.rosterId],
@@ -173,11 +185,15 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
       </Card>
     ) : null;
 
+  // News relevance: player-id match when the item carries ingest-time tags;
+  // full-name match only as fallback (surname-only matching misfires).
+  const myIds = new Set(myRoster?.players ?? []);
   const myNames = new Set((myRoster?.players ?? []).map((pid) => player(pid).name.toLowerCase()));
   const newsItems = myRoster
     ? data.news.filter((n) => {
+        if (n.playerIds?.length) return n.playerIds.some((pid) => myIds.has(pid));
         const t = n.title.toLowerCase();
-        return Array.from(myNames).some((name) => t.includes(name) || t.includes(name.split(" ").slice(-1)[0]));
+        return Array.from(myNames).some((name) => name.length > 5 && t.includes(name));
       })
     : data.news;
 
@@ -203,29 +219,63 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
         <Tag>{data.league.scoring}</Tag>
         <span style={{ flex: 1 }} />
         <Tabs items={TABS} value={tab} onChange={setTab} size="sm" />
-        <Select
-          options={Array.from({ length: 18 }, (_, i) => ({ value: String(i + 1), label: `Week ${i + 1}` }))}
-          value={String(data.week)}
-          onChange={(e) => setWeek(Number(e.target.value))}
-          style={{ width: 110 }}
-        />
-        <Select
-          options={[
-            { value: "", label: "Pick your team…" },
-            ...data.users.map((u) => ({ value: u.userId, label: u.teamName ?? u.name })),
-          ]}
-          value={myUserId}
-          onChange={(e) => chooseTeam(e.target.value)}
-          style={{ width: 170 }}
-        />
         {data.league.draftId && (
-          <Link href={`/league/${leagueId}/draft`} style={{ fontSize: 13, color: "var(--text-muted)" }}>
-            Draft room →
-          </Link>
+          <Tabs
+            size="sm"
+            items={["BOARD", "DASHBOARD"]}
+            value="DASHBOARD"
+            onChange={(v) => v === "BOARD" && router.push(`/league/${leagueId}/draft`)}
+          />
+        )}
+        {myTeamLabel ? (
+          <TeamChip label={myTeamLabel} onClick={() => setPickerOpen(true)} />
+        ) : (
+          <button
+            onClick={() => setPickerOpen(true)}
+            style={{
+              background: "transparent",
+              border: "1px solid var(--line-2)",
+              borderRadius: "var(--radius-pill)",
+              padding: "4px 12px",
+              cursor: "pointer",
+              color: "var(--text-muted)",
+              fontSize: 11,
+              fontFamily: "var(--font-body)",
+            }}
+          >
+            Pick team
+          </button>
         )}
       </header>
 
+      {(pickerOpen || (prefsLoaded && !myUserId && !pickerDismissed && data.users.length > 0)) && (
+        <TeamPickerModal
+          options={data.users.map((u) => {
+            const r = data.rosters.find((x) => x.ownerId === u.userId);
+            return { value: u.userId, label: u.teamName ?? u.name, slot: r?.rosterId ?? null };
+          })}
+          onPick={chooseTeam}
+          onSkip={() => {
+            setPickerDismissed(true);
+            setPickerOpen(false);
+          }}
+        />
+      )}
+
       <div style={{ padding: 14, flex: 1 }}>
+        {(tab === "START/SIT" || tab === "MATCHUP") && (
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+            <Select
+              options={Array.from({ length: data.currentWeek }, (_, i) => ({
+                value: String(i + 1),
+                label: `Week ${i + 1}`,
+              }))}
+              value={String(data.week)}
+              onChange={(e) => setWeek(Number(e.target.value))}
+              style={{ width: 110 }}
+            />
+          </div>
+        )}
         {data.degraded.length > 0 && (
           <Toast tone="warn" title="Degraded data" style={{ marginBottom: 14 }}>
             {data.degraded.join(", ")} unavailable — showing what&apos;s cached.

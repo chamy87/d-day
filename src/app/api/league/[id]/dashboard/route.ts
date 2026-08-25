@@ -3,7 +3,8 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { sleeper, scoringLabel } from "@/lib/sleeper";
 import { scoreProjection } from "@/lib/vbd";
 import { ensurePlayers, ensureWeekProjections, ensureValues } from "@/lib/ingest";
-import { relevantNews, type NewsItem } from "@/lib/news";
+import { relevantNews } from "@/lib/news";
+import type { NewsItem } from "@/lib/news";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -16,6 +17,8 @@ export type DashboardPlayer = {
   injury: string | null;
   bye: number | null;
   proj: number | null;
+  /** FantasyCalc market value for this league's shape. */
+  value: number | null;
 };
 
 export type DashboardResponse = {
@@ -89,9 +92,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   const ids = Array.from(relevant);
   const playerRows: { sleeper_id: string; name: string; team: string | null; pos: string; bye: number | null; status: string | null }[] = [];
   const projRows: { sleeper_id: string; stats: Record<string, number> }[] = [];
+  const valueRows: { sleeper_id: string; value: number }[] = [];
   for (let i = 0; i < ids.length; i += 150) {
     const chunk = ids.slice(i, i + 150);
-    const [{ data: p }, { data: pr }] = await Promise.all([
+    const [{ data: p }, { data: pr }, { data: vr }] = await Promise.all([
       db.from("players").select("sleeper_id,name,team,pos,bye,status").in("sleeper_id", chunk),
       db
         .from("projections")
@@ -99,11 +103,14 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
         .eq("season", Number(state.season))
         .eq("week", week)
         .in("sleeper_id", chunk),
+      db.from("values_fc").select("sleeper_id,value").eq("num_qbs", numQbs).eq("ppr", pprParam).in("sleeper_id", chunk),
     ]);
     playerRows.push(...(p ?? []));
     projRows.push(...(pr ?? []));
+    valueRows.push(...(vr ?? []));
   }
   const projById = new Map(projRows.map((r) => [r.sleeper_id, r.stats]));
+  const fcById = new Map(valueRows.map((r) => [r.sleeper_id, r.value]));
 
   const playersById: Record<string, DashboardPlayer> = {};
   for (const p of playerRows) {
@@ -116,27 +123,15 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       injury: p.status,
       bye: p.bye,
       proj: stats ? scoreProjection(stats, league.scoring_settings ?? {}) : null,
+      value: fcById.get(p.sleeper_id) ?? null,
     };
-  }
-
-  // FantasyCalc rest-of-season values for the trending set (league shape).
-  const trendingIds = trending.map((t) => t.player_id);
-  const valueById = new Map<string, number>();
-  if (trendingIds.length) {
-    const { data: vals } = await db
-      .from("values_fc")
-      .select("sleeper_id,value")
-      .eq("num_qbs", numQbs)
-      .eq("ppr", pprParam)
-      .in("sleeper_id", trendingIds);
-    for (const v of vals ?? []) valueById.set(v.sleeper_id, v.value);
   }
 
   const waivers = trending
     .filter((t) => !rostered.has(t.player_id) && playersById[t.player_id])
     .map((t) => {
       const proj = playersById[t.player_id].proj ?? 0;
-      const value = valueById.get(t.player_id) ?? null;
+      const value = fcById.get(t.player_id) ?? null;
       return {
         id: t.player_id,
         adds24h: t.count,
@@ -152,9 +147,30 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     )
     .slice(0, 12);
 
-  const rosteredNames = playerRows.filter((p) => rostered.has(p.sleeper_id)).map((p) => p.name);
-  const { items: news, degraded: newsDegraded } = await relevantNews(db, rosteredNames);
-  if (newsDegraded) degraded.push("news");
+  // News: prefer the hourly-ingested, player-id-tagged corpus; fall back to a
+  // live fetch (name-matched, no ids) only when the cache is empty.
+  let news: NewsItem[] = [];
+  const { data: cachedNews } = await db
+    .from("news_cache")
+    .select("id,source,title,url,player_ids,published_at")
+    .gte("published_at", new Date(Date.now() - 48 * 3600 * 1000).toISOString())
+    .order("published_at", { ascending: false })
+    .limit(40);
+  if (cachedNews?.length) {
+    news = cachedNews.map((n) => ({
+      id: n.id,
+      source: n.source,
+      title: n.title,
+      url: n.url,
+      publishedAt: n.published_at,
+      playerIds: n.player_ids ?? [],
+    }));
+  } else {
+    const rosteredNames = playerRows.filter((p) => rostered.has(p.sleeper_id)).map((p) => p.name);
+    const live = await relevantNews(db, rosteredNames);
+    news = live.items;
+    if (live.degraded) degraded.push("news");
+  }
 
   return NextResponse.json({
     league: {

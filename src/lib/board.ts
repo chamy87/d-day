@@ -116,6 +116,27 @@ export async function buildBoard(db: SupabaseClient, cfg: BoardConfig, refresh =
 
   const board = computeVBD(projected, { rosterPositions: cfg.rosterPositions, teams: cfg.teams }).slice(0, 300);
 
+  // FantasyCalc market values for the expandable row detail.
+  try {
+    const numQbs = superflex ? 2 : 1;
+    const rec = cfg.scoringSettings?.rec ?? 0;
+    const ppr = rec >= 1 ? 1 : rec >= 0.5 ? 0.5 : 0;
+    const ids = board.map((p) => p.sleeperId);
+    const fcById = new Map<string, number>();
+    for (let i = 0; i < ids.length; i += 200) {
+      const { data } = await db
+        .from("values_fc")
+        .select("sleeper_id,value")
+        .eq("num_qbs", numQbs)
+        .eq("ppr", ppr)
+        .in("sleeper_id", ids.slice(i, i + 200));
+      for (const v of data ?? []) fcById.set(v.sleeper_id, v.value);
+    }
+    for (const p of board) p.fc = fcById.get(p.sleeperId) ?? null;
+  } catch {
+    // market values are optional detail
+  }
+
   // Boris Chen tiers override the computed VBD-gap tiers where names match;
   // then forced non-decreasing down the board so groups stay sane.
   try {

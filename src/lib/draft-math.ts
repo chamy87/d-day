@@ -114,7 +114,18 @@ export function suggestPicks(
         : { RB: 1.06 };
   const leanNote = rec >= 1 ? "PPR leans pass-catchers" : rec >= 0.5 ? "half-PPR" : "standard leans RB volume";
 
+  // Balance guards: when remaining picks barely cover unfilled starting slots,
+  // only suggest positions that fill one — no stacking a 5th RB while the TE
+  // slot sits empty at the end of the draft.
+  const unfilledStarters = roster.filter((s) => s.need).length;
+  const mustFill = remainingPicks != null && remainingPicks <= unfilledStarters + 1;
+  const directStarters: Record<string, number> = {};
+  for (const s of roster) {
+    if (!["FLEX", "SFLX", "BN"].includes(s.slot)) directStarters[s.slot] = (directStarters[s.slot] ?? 0) + 1;
+  }
+
   const eligible = available.filter((p) => {
+    if (mustFill && !needPositions.has(p.pos)) return false;
     if (p.pos === "QB" && (owned.QB ?? 0) >= (superflex ? 3 : 2)) return false;
     if (p.pos === "TE" && (owned.TE ?? 0) >= 2 && !needPositions.has("TE")) return false;
     if ((p.pos === "K" || p.pos === "DEF") && ((owned[p.pos] ?? 0) >= 1 || !endGame)) return false;
@@ -132,14 +143,21 @@ export function suggestPicks(
       let score = p.vbd * (lean[p.pos] ?? 1);
       if (needPositions.has(p.pos)) score += 10;
       if (superflex && p.pos === "QB" && (owned.QB ?? 0) < 2) score += 8;
-      return { p, score };
+      // Diminishing returns: starters at this position filled and 2+ spare —
+      // a 5th tier-1 RB is worth less to you than balance elsewhere.
+      const stacked =
+        !needPositions.has(p.pos) && (owned[p.pos] ?? 0) >= (directStarters[p.pos] ?? 0) + 2;
+      if (stacked) score *= 0.72;
+      return { p, score, stacked };
     })
     .sort((a, b) => b.score - a.score)
     .slice(0, count)
-    .map(({ p }) => {
+    .map(({ p, stacked }) => {
       let why = "Best VBD available.";
       const directNeed = roster.some((s) => s.need && s.slot === p.pos);
-      if (superflex && p.pos === "QB" && (owned.QB ?? 0) < 2) {
+      if (mustFill && needPositions.has(p.pos)) {
+        why = `${remainingPicks} pick${remainingPicks === 1 ? "" : "s"} left — lock your ${p.pos} starter.`;
+      } else if (superflex && p.pos === "QB" && (owned.QB ?? 0) < 2) {
         why = "Superflex — QB2 before the position thins out.";
       } else if (p.adpDelta != null && p.adpDelta >= 8) {
         why = `Falling — goes ~${Math.round(p.adp ?? 0)} on average.`;
@@ -147,6 +165,8 @@ export function suggestPicks(
         why = `Fills your empty ${p.pos} slot.`;
       } else if (lastInTier.get(`${p.pos}:${p.tier}`) === p) {
         why = `Last ${p.pos} in Tier ${p.tier}.`;
+      } else if (stacked) {
+        why = `Value too big to pass — but your ${p.pos} room is already deep.`;
       } else if ((lean[p.pos] ?? 1) > 1) {
         why = `Best VBD available — ${leanNote}.`;
       }

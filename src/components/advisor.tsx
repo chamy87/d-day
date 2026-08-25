@@ -90,6 +90,8 @@ export function AdvisorTab({
   const totalSent = involved.reduce((n, r) => n + (sends[r]?.length ?? 0), 0);
   const everySideSends = involved.every((r) => (sends[r]?.length ?? 0) > 0);
 
+  const valueOf = (pid: string) => data.playersById[pid]?.value ?? 0;
+
   const rosterList = (rosterId: number) => {
     const roster = data.rosters.find((r) => r.rosterId === rosterId);
     const selected = sends[rosterId] ?? [];
@@ -100,50 +102,69 @@ export function AdvisorTab({
           if (!p) return null;
           const sel = selected.find((s) => s.playerId === pid);
           return (
-            <label
+            <div
               key={pid}
+              role="checkbox"
+              aria-checked={!!sel}
+              tabIndex={0}
+              onClick={() => toggleSend(rosterId, pid)}
+              onKeyDown={(e) => {
+                if (e.key === " " || e.key === "Enter") {
+                  e.preventDefault();
+                  toggleSend(rosterId, pid);
+                }
+              }}
               style={{
                 display: "flex",
                 alignItems: "center",
                 gap: 8,
-                padding: "6px 10px",
+                padding: "7px 10px",
+                minHeight: 40,
                 borderBottom: "1px solid var(--line-1)",
+                borderLeft: "2px solid " + (sel ? "var(--accent)" : "transparent"),
                 cursor: "pointer",
                 background: sel ? "var(--accent-dim)" : "transparent",
+                transition: "background var(--dur-fast)",
               }}
             >
-              <input type="checkbox" checked={!!sel} onChange={() => toggleSend(rosterId, pid)} />
               <PositionBadge pos={(p.pos as Position) ?? "BN"} size="sm" />
               <span style={{ fontSize: 13, flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {p.name}
               </span>
-              {sel && involved.length > 2 && (
-                <select
-                  value={sel.toRosterId}
-                  onChange={(e) => setRecipient(rosterId, pid, Number(e.target.value))}
-                  style={{
-                    background: "var(--bg-1)",
-                    color: "var(--text-muted)",
-                    border: "1px solid var(--line-2)",
-                    borderRadius: 4,
-                    fontSize: 11,
-                  }}
-                >
-                  {involved
-                    .filter((r) => r !== rosterId)
-                    .map((r) => (
-                      <option key={r} value={r}>
-                        → {teamNameOf(r)}
-                      </option>
-                    ))}
-                </select>
+              {p.value != null && (
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: sel ? "var(--accent)" : "var(--text-faint)" }}>
+                  {p.value.toLocaleString()}
+                </span>
               )}
-            </label>
+              {sel && involved.length > 2 && (
+                <span onClick={(e) => e.stopPropagation()}>
+                  <Select
+                    options={involved
+                      .filter((r) => r !== rosterId)
+                      .map((r) => ({ value: String(r), label: `→ ${teamNameOf(r)}` }))}
+                    value={String(sel.toRosterId)}
+                    onChange={(e) => setRecipient(rosterId, pid, Number(e.target.value))}
+                    style={{ width: 140 }}
+                  />
+                </span>
+              )}
+            </div>
           );
         })}
       </div>
     );
   };
+
+  // Pre-evaluation value balance per side (item 7): fairness at a glance.
+  const balance = involved.map((r) => {
+    const out = (sends[r] ?? []).reduce((n, s) => n + valueOf(s.playerId), 0);
+    const inn = involved
+      .flatMap((o) => sends[o] ?? [])
+      .filter((s) => s.toRosterId === r)
+      .reduce((n, s) => n + valueOf(s.playerId), 0);
+    return { rosterId: r, out, inn, delta: inn - out };
+  });
+  const maxSide = Math.max(1, ...balance.flatMap((b) => [b.out, b.inn]));
 
   if (myRosterId == null) {
     return (
@@ -259,6 +280,34 @@ export function AdvisorTab({
                 {rosterList(rosterId)}
               </div>
             ))}
+
+          {teamB != null && totalSent > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {balance.map((b) => (
+                <div key={b.rosterId} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 11, color: "var(--text-faint)", width: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {teamNameOf(b.rosterId)}
+                  </span>
+                  <div style={{ flex: 1, display: "flex", height: 6, borderRadius: 3, overflow: "hidden", background: "var(--bg-1)" }}>
+                    <span style={{ width: `${(b.out / maxSide) * 50}%`, background: "var(--reach)", opacity: 0.7 }} />
+                    <span style={{ width: `${(b.inn / maxSide) * 50}%`, background: "var(--value)", opacity: 0.7 }} />
+                  </div>
+                  <span
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 11,
+                      width: 60,
+                      textAlign: "right",
+                      color: b.delta > 0 ? "var(--value)" : b.delta < 0 ? "var(--reach)" : "var(--text-faint)",
+                    }}
+                  >
+                    {b.delta >= 0 ? "+" : ""}
+                    {b.delta.toLocaleString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {teamB != null && (
             <Button

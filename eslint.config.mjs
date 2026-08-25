@@ -16,6 +16,7 @@ const eslintConfig = defineConfig([
     "components/**",
     "ui_kits/**",
     "guidelines/**",
+    "proposals/**",
     "_ds_bundle.js",
   ]),
 ]);
