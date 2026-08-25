@@ -202,6 +202,9 @@ export function DraftRoom({ leagueId }: { leagueId: string }) {
           </div>
         )}
         {!drafting && draft && <Tag tone={draft.status === "complete" ? "neutral" : "accent"}>{draft.status.replace("_", "-").toUpperCase()}</Tag>}
+        <a href={`/league/${leagueId}`} style={{ fontSize: 13, color: "var(--text-muted)" }}>
+          Dashboard →
+        </a>
         <Select
           options={[{ value: "", label: "Pick your team…" }, ...teamOptions]}
           value={myUserId}

@@ -126,14 +126,21 @@ export function Landing() {
               <PositionBadge key={i} pos={toPosition(p)} size="sm" />
             ))}
           </div>
-          <div style={{ marginTop: 16 }}>
+          <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
             <Button
-              variant="primary"
-              style={{ width: "100%" }}
+              variant={league.status === "in_season" || league.status === "complete" ? "secondary" : "primary"}
+              style={{ flex: 1 }}
               disabled={!league.draftId}
               onClick={() => router.push(`/league/${league.leagueId}/draft`)}
             >
-              {league.draftId ? "Enter draft room →" : "No draft attached to this league"}
+              Draft room →
+            </Button>
+            <Button
+              variant={league.status === "in_season" || league.status === "complete" ? "primary" : "secondary"}
+              style={{ flex: 1 }}
+              onClick={() => router.push(`/league/${league.leagueId}`)}
+            >
+              Dashboard →
             </Button>
           </div>
         </Card>

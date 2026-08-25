@@ -96,6 +96,29 @@ export async function ensureProjections(
   return true;
 }
 
+/** Sleeper weekly projections (fragile) → projections table, week N. */
+export async function ensureWeekProjections(
+  db: SupabaseClient,
+  season: string,
+  week: number,
+  force = false,
+): Promise<boolean> {
+  const fresh = await newestUpdate(db, "projections", { season: Number(season), week });
+  if (!force && isFresh(fresh)) return false;
+  const rows = (await sleeper.weekProjections(season, week))
+    .filter((p) => p.stats && Object.keys(p.stats).length > 0)
+    .map((p) => ({
+      season: Number(season),
+      week,
+      sleeper_id: p.player_id,
+      stats: p.stats,
+      updated_at: new Date().toISOString(),
+    }));
+  if (!rows.length) throw new Error("weekly projections source returned no rows");
+  await chunkedUpsert(db, "projections", rows, "season,week,sleeper_id");
+  return true;
+}
+
 type FfcPlayer = {
   name: string;
   position: string;

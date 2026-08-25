@@ -58,9 +58,30 @@ async function get<T>(path: string, base = BASE): Promise<T> {
   return (await res.json()) as T;
 }
 
+export type SleeperRoster = {
+  roster_id: number;
+  owner_id: string | null;
+  players: string[] | null;
+  starters: string[] | null;
+};
+
+export type SleeperMatchup = {
+  roster_id: number;
+  matchup_id: number | null;
+  points: number;
+  starters: string[] | null;
+  players: string[] | null;
+};
+
 export const sleeper = {
   league: (id: string) => get<SleeperLeague | null>(`/league/${id}`),
   leagueUsers: (id: string) => get<SleeperUser[]>(`/league/${id}/users`),
+  leagueRosters: (id: string) => get<SleeperRoster[]>(`/league/${id}/rosters`),
+  matchups: (id: string, week: number) => get<SleeperMatchup[]>(`/league/${id}/matchups/${week}`),
+  trendingAdds: () =>
+    get<{ player_id: string; count: number }[]>(
+      `/players/nfl/trending/add?lookback_hours=24&limit=30`,
+    ),
   draft: (id: string) => get<SleeperDraft | null>(`/draft/${id}`),
   draftPicks: (id: string) => get<SleeperPick[]>(`/draft/${id}/picks`),
   /** ~5 MB payload — call at most daily (used by ingest, never per-request). */
@@ -70,6 +91,12 @@ export const sleeper = {
   seasonProjections: (season: string) =>
     get<{ player_id: string; stats: Record<string, number> | null }[]>(
       `/projections/nfl/${season}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=K&position[]=DEF&order_by=adp_ppr`,
+      "https://api.sleeper.com",
+    ),
+  /** Unofficial weekly projections — same caveats as seasonProjections. */
+  weekProjections: (season: string, week: number) =>
+    get<{ player_id: string; stats: Record<string, number> | null }[]>(
+      `/projections/nfl/${season}/${week}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=K&position[]=DEF&order_by=pts_ppr`,
       "https://api.sleeper.com",
     ),
 };
