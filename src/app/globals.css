@@ -1,26 +1,145 @@
 @import "tailwindcss";
 
+/* ── D-Day design tokens (source: tokens/*.css in the design system) ──────── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  /* Surfaces (dark-only system) */
+  --bg-0: #0b0e11;
+  --bg-1: #12161b;
+  --bg-2: #1a2027;
+  --bg-3: #232b34;
+  --line-1: #2a333d;
+  --line-2: #3a4550;
+  /* Foreground */
+  --fg-1: #f2f5f7;
+  --fg-2: #a8b3bd;
+  --fg-3: #66727d;
+  /* Brand accent — "on the clock" amber */
+  --accent: #ffb43d;
+  --accent-hover: #ffc468;
+  --accent-press: #e89a1f;
+  --accent-ink: #1a1204;
+  --accent-dim: rgba(255, 180, 61, 0.14);
+  /* Semantic */
+  --value: #3ddc97;
+  --value-dim: rgba(61, 220, 151, 0.14);
+  --reach: #ff5c5c;
+  --reach-dim: rgba(255, 92, 92, 0.14);
+  --warn: #ffd23d;
+  /* Position badges */
+  --pos-qb: #f86a5c;
+  --pos-rb: #46c2a0;
+  --pos-wr: #58a7ff;
+  --pos-te: #ff8a65;
+  --pos-k: #b39ddb;
+  --pos-def: #8d9aa5;
+  --pos-flex: #d7b45c;
+  /* Tier scale (T1 hottest → T6 coldest) */
+  --tier-1: #ffb43d;
+  --tier-2: #ff8a65;
+  --tier-3: #58a7ff;
+  --tier-4: #46c2a0;
+  --tier-5: #b39ddb;
+  --tier-6: #66727d;
+  /* Semantic aliases */
+  --surface-page: var(--bg-0);
+  --surface-panel: var(--bg-1);
+  --surface-card: var(--bg-2);
+  --surface-raised: var(--bg-3);
+  --text-body: var(--fg-1);
+  --text-muted: var(--fg-2);
+  --text-faint: var(--fg-3);
+  --border-card: var(--line-1);
+  --border-strong: var(--line-2);
+  --focus-ring: 0 0 0 2px var(--bg-0), 0 0 0 4px var(--accent);
+  /* Type (families come from next/font variables set in layout.tsx) */
+  --font-display: var(--font-archivo), sans-serif;
+  --font-body: var(--font-archivo), sans-serif;
+  --font-mono: var(--font-jetbrains-mono), monospace;
+  --stretch-display: 125%;
+  --stretch-body: 100%;
+  --text-hero: clamp(40px, 6vw, 72px);
+  --text-h1: 32px;
+  --text-h2: 24px;
+  --text-h3: 18px;
+  --text-body-size: 15px;
+  --text-sm: 13px;
+  --text-xs: 11px;
+  --weight-black: 850;
+  --weight-bold: 700;
+  --weight-semibold: 600;
+  --weight-regular: 440;
+  --leading-tight: 1.05;
+  --leading-snug: 1.25;
+  --leading-body: 1.5;
+  --track-caps: 0.08em;
+  /* Spacing / radius */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+  --control-h: 36px;
+  --control-h-lg: 44px;
+  --panel-pad: var(--sp-4);
+  --card-pad: var(--sp-4);
+  /* Effects */
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.55);
+  --glow-accent: 0 0 0 1px var(--accent), 0 0 24px rgba(255, 180, 61, 0.35);
+  --ease-snap: cubic-bezier(0.2, 0.9, 0.25, 1);
+  --dur-fast: 120ms;
+  --dur-med: 220ms;
+  --scrim-bottom: linear-gradient(180deg, rgba(11, 14, 17, 0) 0%, rgba(11, 14, 17, 0.9) 100%);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-body);
+  font-weight: var(--weight-regular);
+  color: var(--text-body);
+  background: var(--surface-page);
+  font-size: var(--text-body-size);
+  line-height: var(--leading-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+@keyframes dday-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px var(--accent), 0 0 12px rgba(255, 180, 61, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 0 1px var(--accent), 0 0 28px rgba(255, 180, 61, 0.45);
+  }
+}
+@keyframes dday-skeleton {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+.dday-skeleton {
+  background: linear-gradient(90deg, var(--bg-2) 25%, var(--bg-3) 50%, var(--bg-2) 75%);
+  background-size: 200% 100%;
+  animation: dday-skeleton 1.4s linear infinite;
+  border-radius: var(--radius-sm);
 }

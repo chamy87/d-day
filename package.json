@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "db:push": "sh -c 'set -a; . ./.env.local; set +a; supabase db push --db-url \"$SUPABASE_DB_URL\"'"
+    "db:push": "sh -c 'set -a; . ./.env.local; set +a; URL=\"$SUPABASE_DB_URL\"; case \"$SUPABASE_DB_API_URL\" in postgres*) URL=\"$SUPABASE_DB_API_URL\";; esac; [ -n \"$URL\" ] || { echo \"No postgres:// connection string found in SUPABASE_DB_URL or SUPABASE_DB_API_URL\"; exit 1; }; supabase db push --db-url \"$URL\"'"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",
