@@ -23,6 +23,7 @@ import {
   suggestPicks,
   scarcityNote,
   clockRemaining,
+  gradeDraft,
 } from "@/lib/draft-math";
 import { useIsMobile } from "@/lib/use-mobile";
 import { loadTeamPref, saveTeamPref } from "@/lib/session-client";
@@ -51,7 +52,20 @@ export function DraftRoom({ leagueId, draftId: mockDraftId }: { leagueId?: strin
     queryKey: ["draft", draftId],
     queryFn: () => getJson<{ draft: SleeperDraft; picks: SleeperPick[] }>(`/api/draft/${draftId}/picks`),
     enabled: !!draftId,
-    refetchInterval: (q) => (q.state.data?.draft.status === "drafting" ? 3000 : false),
+    // Poll cadence follows the league's pick clock: ~1/15th of the timer,
+    // clamped to 2–5s while drafting (60s clock → 4s). Paused/pre-draft
+    // polls at 7s so a resume is caught quickly; complete stops polling.
+    refetchInterval: (q) => {
+      const st = q.state.data?.draft.status;
+      if (st === "drafting") {
+        const timer = q.state.data?.draft.settings.pick_timer ?? 60;
+        return Math.min(5000, Math.max(2000, Math.round((timer * 1000) / 15)));
+      }
+      if (st === "paused" || st === "pre_draft") return 7000;
+      return false;
+    },
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
   });
 
   const isMobile = useIsMobile();
@@ -84,6 +98,17 @@ export function DraftRoom({ leagueId, draftId: mockDraftId }: { leagueId?: strin
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, [drafting]);
+
+  // Pick-made trigger: the clock hitting zero means a pick (or autopick) just
+  // happened — refetch immediately instead of waiting out the poll interval.
+  const lastZeroRefetch = React.useRef(0);
+  const secondsLeftNow = draftState.data ? clockRemaining(draftState.data.draft, now) : null;
+  React.useEffect(() => {
+    if (secondsLeftNow === 0 && Date.now() - lastZeroRefetch.current > 1500) {
+      lastZeroRefetch.current = Date.now();
+      draftState.refetch();
+    }
+  }, [secondsLeftNow, draftState]);
 
   if (board.isLoading) {
     return (
@@ -150,8 +175,19 @@ export function DraftRoom({ leagueId, draftId: mockDraftId }: { leagueId?: strin
 
   const myPicks = mySlot != null ? picks.filter((p) => p.draft_slot === mySlot) : [];
   const roster = fillRoster(league.rosterPositions, myPicks);
-  const suggestions = mySlot != null ? suggestPicks(available, roster) : [];
-  const scarcity = mySlot != null ? scarcityNote(available, roster) : null;
+  const rounds = draft?.settings.rounds ?? league.rosterPositions.length;
+  const recValue = league.scoring === "PPR" ? 1 : league.scoring === "Half PPR" ? 0.5 : parseFloat(league.scoring) || 0;
+  const complete = draft?.status === "complete";
+  const suggestions =
+    mySlot != null && !complete
+      ? suggestPicks(available, roster, {
+          rec: recValue,
+          superflex: league.superflex,
+          remainingPicks: mySlot != null ? Math.max(0, rounds - myPicks.length) : null,
+        })
+      : [];
+  const scarcity = mySlot != null && !complete ? scarcityNote(available, roster) : null;
+  const grades = complete && picks.length ? gradeDraft(rows, picks, teams) : [];
 
   const visible = rows.filter(
     (p) => (pos === "ALL" || p.pos === pos) && !(hideDrafted && draftedIds.has(p.sleeperId)),
@@ -251,12 +287,13 @@ export function DraftRoom({ leagueId, draftId: mockDraftId }: { leagueId?: strin
           title="Best available"
           pad={false}
           style={{
-            flex: isMobile ? undefined : 1,
+            flexGrow: isMobile ? 0 : 1,
+            flexShrink: 0,
+            flexBasis: "auto",
             display: "flex",
             flexDirection: "column",
             minWidth: 0,
             height: isMobile ? "58dvh" : undefined,
-            flexShrink: 0,
           }}
           action={
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -316,6 +353,56 @@ export function DraftRoom({ leagueId, draftId: mockDraftId }: { leagueId?: strin
             <Toast tone="accent" title="Pick your team" style={{ flexShrink: 0 }}>
               Choose your team above to get roster tracking and suggested picks.
             </Toast>
+          )}
+          {grades.length > 0 && (
+            <Card title="Draft grades" style={{ flexShrink: 0 }} pad={false}>
+              {mySlot != null && (
+                <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--line-1)", display: "flex", alignItems: "baseline", gap: 12 }}>
+                  <span
+                    style={{
+                      fontFamily: "var(--font-display)",
+                      fontStretch: "125%",
+                      fontWeight: 850,
+                      fontSize: 40,
+                      color: "var(--accent)",
+                      lineHeight: 1,
+                    }}
+                  >
+                    {grades.find((g) => g.slot === mySlot)?.grade ?? "—"}
+                  </span>
+                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    your draft ·{" "}
+                    <span style={{ fontFamily: "var(--font-mono)" }}>
+                      +{grades.find((g) => g.slot === mySlot)?.totalVbd ?? 0} VBD
+                    </span>{" "}
+                    · {grades.find((g) => g.slot === mySlot)?.steal ?? 0} ADP steals
+                  </span>
+                </div>
+              )}
+              {grades.map((g) => (
+                <div
+                  key={g.slot}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "6px 16px",
+                    borderBottom: "1px solid var(--line-1)",
+                    background: g.slot === mySlot ? "var(--accent-dim)" : "transparent",
+                  }}
+                >
+                  <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700, width: 26, color: g.slot === mySlot ? "var(--accent)" : "var(--text-body)" }}>
+                    {g.grade}
+                  </span>
+                  <span style={{ flex: 1, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {nameOfSlot(g.slot)}
+                  </span>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-faint)" }}>
+                    +{g.totalVbd}
+                  </span>
+                </div>
+              ))}
+            </Card>
           )}
           {suggestions.length > 0 && (
             <Card title="Suggested pick" glow={untilMe === 0} style={{ flexShrink: 0 }}>

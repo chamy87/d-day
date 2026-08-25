@@ -70,10 +70,24 @@ export function fillRoster(rosterPositions: string[], myPicks: SleeperPick[]): R
 
 export type Suggestion = { player: Ranked; why: string };
 
-/** Top suggestions: VBD with a boost for empty starting slots; one-line why. */
+export type LeagueStrategy = {
+  /** rec scoring value: 1 = PPR, 0.5 = half, 0 = standard */
+  rec: number;
+  superflex: boolean;
+  /** Picks this team still has, if known — gates K/DEF timing. */
+  remainingPicks: number | null;
+};
+
+/**
+ * Top suggestions: VBD, boosted for empty starting slots and tilted by
+ * league type — PPR leans pass-catchers, standard leans RBs, superflex
+ * front-loads QBs — with roster-construction guards (no third QB in 1QB
+ * leagues, no K/DEF until the end game).
+ */
 export function suggestPicks(
   available: Ranked[],
   roster: RosterSlot[],
+  strategy: LeagueStrategy,
   count = 3,
 ): Suggestion[] {
   const needPositions = new Set<string>();
@@ -84,28 +98,99 @@ export function suggestPicks(
     else needPositions.add(s.slot);
   }
 
+  const owned: Record<string, number> = {};
+  for (const s of roster) {
+    const pos = s.player?.metadata?.position;
+    if (pos) owned[pos] = (owned[pos] ?? 0) + 1;
+  }
+
+  const { rec, superflex, remainingPicks } = strategy;
+  const endGame = remainingPicks != null && remainingPicks <= 3;
+  const lean: Record<string, number> =
+    rec >= 1
+      ? { WR: 1.06, TE: 1.03, RB: 1 }
+      : rec >= 0.5
+        ? { WR: 1.03, RB: 1.02 }
+        : { RB: 1.06 };
+  const leanNote = rec >= 1 ? "PPR leans pass-catchers" : rec >= 0.5 ? "half-PPR" : "standard leans RB volume";
+
+  const eligible = available.filter((p) => {
+    if (p.pos === "QB" && (owned.QB ?? 0) >= (superflex ? 3 : 2)) return false;
+    if (p.pos === "TE" && (owned.TE ?? 0) >= 2 && !needPositions.has("TE")) return false;
+    if ((p.pos === "K" || p.pos === "DEF") && ((owned[p.pos] ?? 0) >= 1 || !endGame)) return false;
+    return true;
+  });
+
   const lastInTier = new Map<string, Ranked>();
-  for (const p of available) {
+  for (const p of eligible) {
     lastInTier.set(`${p.pos}:${p.tier}`, p); // last write wins = last in tier
   }
 
-  return available
+  return eligible
     .slice(0, 40)
-    .map((p) => ({ p, score: p.vbd + (needPositions.has(p.pos) ? 10 : 0) }))
+    .map((p) => {
+      let score = p.vbd * (lean[p.pos] ?? 1);
+      if (needPositions.has(p.pos)) score += 10;
+      if (superflex && p.pos === "QB" && (owned.QB ?? 0) < 2) score += 8;
+      return { p, score };
+    })
     .sort((a, b) => b.score - a.score)
     .slice(0, count)
     .map(({ p }) => {
       let why = "Best VBD available.";
       const directNeed = roster.some((s) => s.need && s.slot === p.pos);
-      if (p.adpDelta != null && p.adpDelta >= 8) {
+      if (superflex && p.pos === "QB" && (owned.QB ?? 0) < 2) {
+        why = "Superflex — QB2 before the position thins out.";
+      } else if (p.adpDelta != null && p.adpDelta >= 8) {
         why = `Falling — goes ~${Math.round(p.adp ?? 0)} on average.`;
       } else if (directNeed) {
         why = `Fills your empty ${p.pos} slot.`;
       } else if (lastInTier.get(`${p.pos}:${p.tier}`) === p) {
         why = `Last ${p.pos} in Tier ${p.tier}.`;
+      } else if ((lean[p.pos] ?? 1) > 1) {
+        why = `Best VBD available — ${leanNote}.`;
       }
       return { player: p, why };
     });
+}
+
+export type TeamGrade = {
+  slot: number;
+  totalVbd: number;
+  steal: number;
+  score: number;
+  grade: string;
+};
+
+const GRADE_SCALE = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D"];
+
+/**
+ * Post-draft grades per draft slot: VBD captured plus ADP steals (picks made
+ * later than market price), graded on the league's curve.
+ */
+export function gradeDraft(board: Ranked[], picks: SleeperPick[], teams: number): TeamGrade[] {
+  const byId = new Map(board.map((p) => [p.sleeperId, p]));
+  const acc = new Map<number, { vbd: number; steal: number }>();
+  for (let slot = 1; slot <= teams; slot++) acc.set(slot, { vbd: 0, steal: 0 });
+  for (const p of picks) {
+    const cur = acc.get(p.draft_slot);
+    if (!cur) continue;
+    const b = byId.get(p.player_id);
+    if (!b) continue;
+    cur.vbd += Math.max(0, b.vbd);
+    if (b.adp != null) cur.steal += Math.max(0, Math.round(p.pick_no - b.adp));
+  }
+  const rows = [...acc.entries()].map(([slot, v]) => ({
+    slot,
+    totalVbd: Math.round(v.vbd),
+    steal: v.steal,
+    score: v.vbd + v.steal * 1.5,
+  }));
+  rows.sort((a, b) => b.score - a.score);
+  return rows.map((r, i) => ({
+    ...r,
+    grade: GRADE_SCALE[Math.min(GRADE_SCALE.length - 1, Math.floor((i / Math.max(1, rows.length)) * GRADE_SCALE.length))],
+  }));
 }
 
 /** Scarcity warning: fewest remaining in the best live tier of a needed position. */
