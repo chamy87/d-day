@@ -9,6 +9,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 const FEEDS: { source: string; url: string }[] = [
   { source: "ESPN", url: "https://www.espn.com/espn/rss/nfl/news" },
   { source: "CBS", url: "https://www.cbssports.com/rss/headlines/nfl/" },
+  { source: "Yahoo", url: "https://sports.yahoo.com/nfl/rss.xml" },
+  { source: "RotoWire", url: "https://www.rotowire.com/rss/news.php?sport=NFL" },
 ];
 
 export type NewsItem = {

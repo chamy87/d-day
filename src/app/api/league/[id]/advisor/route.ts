@@ -21,6 +21,8 @@ export type AdvisorPlayer = {
   tier: number | null;
   proj: number | null;
   injury: string | null;
+  /** nflfastR seasons, newest first: PPR ppg, games, target share. */
+  history?: { season: number; ppg: number; games: number; targetShare: number | null }[];
 };
 
 export type AdvisorAdvice = {
@@ -76,12 +78,30 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   const bucket = bcScoring(rec);
 
   const allIds = rosters.flatMap((r) => r.players ?? []);
-  const [playersRes, valuesRes, projRes, tiersRes] = await Promise.all([
+  const [playersRes, valuesRes, projRes, tiersRes, historyRes] = await Promise.all([
     db.from("players").select("sleeper_id,name,team,pos,bye,status").in("sleeper_id", allIds),
     db.from("values_fc").select("sleeper_id,value,trend30,age,pos_rank").eq("num_qbs", numQbs).eq("ppr", ppr).in("sleeper_id", allIds),
     db.from("projections").select("sleeper_id,stats").eq("season", Number(state.season)).eq("week", 0).in("sleeper_id", mine.players ?? []),
     db.from("tiers").select("pos,tier,player_name").eq("scoring", bucket),
+    db
+      .from("player_seasons")
+      .select("sleeper_id,season,ppg,games,stats")
+      .in("sleeper_id", allIds)
+      .order("season", { ascending: false }),
   ]);
+  const historyById = new Map<string, { season: number; ppg: number; games: number; targetShare: number | null }[]>();
+  for (const h of historyRes.data ?? []) {
+    const list = historyById.get(h.sleeper_id) ?? [];
+    if (list.length < 4) {
+      list.push({
+        season: h.season,
+        ppg: Number(h.ppg) || 0,
+        games: h.games ?? 0,
+        targetShare: (h.stats as { target_share?: number } | null)?.target_share ?? null,
+      });
+    }
+    historyById.set(h.sleeper_id, list);
+  }
   const pById = new Map((playersRes.data ?? []).map((p) => [p.sleeper_id, p]));
   const vById = new Map((valuesRes.data ?? []).map((v) => [v.sleeper_id, v]));
   const projById = new Map((projRes.data ?? []).map((r) => [r.sleeper_id, r.stats as Record<string, number>]));
@@ -103,6 +123,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       tier: tierByKey.get(`${normalizeName(p.name)}:${p.pos}`) ?? null,
       proj: stats ? scoreProjection(stats, league.scoring_settings ?? {}) : null,
       injury: p.status,
+      history: historyById.get(pid),
     };
   };
 
@@ -114,8 +135,12 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     return u?.metadata?.team_name ?? u?.display_name ?? `Team ${r.roster_id}`;
   };
 
-  const line = (p: AdvisorPlayer) =>
-    `${p.pos} ${p.name} (${p.team ?? "FA"}) age ${p.age ?? "?"} value ${p.value ?? "?"} trend30 ${p.trend30 ?? "?"} tier ${p.tier ?? "?"}${p.proj != null ? ` proj ${p.proj}` : ""}${p.injury ? ` [${p.injury}]` : ""}`;
+  const line = (p: AdvisorPlayer) => {
+    const hist = (p.history ?? [])
+      .map((h) => `${h.season}:${h.ppg}ppg/${h.games}g${h.targetShare ? `/${Math.round(h.targetShare * 100)}%tgt` : ""}`)
+      .join(" ");
+    return `${p.pos} ${p.name} (${p.team ?? "FA"}) age ${p.age ?? "?"} value ${p.value ?? "?"} trend30 ${p.trend30 ?? "?"} tier ${p.tier ?? "?"}${p.proj != null ? ` proj ${p.proj}` : ""}${p.injury ? ` [${p.injury}]` : ""}${hist ? ` hist[${hist}]` : ""}`;
+  };
 
   const others = rosters
     .filter((r) => r.roster_id !== rosterId)
@@ -138,7 +163,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     .limit(15);
   const newsBlock = (newsRows ?? []).map((n) => `- ${n.title} (${n.source})`).join("\n") || "(none this week)";
 
-  const system = `You are D-Day, a terse tactical fantasy football advisor. Voice: second person, numbers lead, no hype, no emoji. Weigh market value, 30-day value trend, age relative to positional aging curves (RBs decline ~27+, WRs ~30+, QBs/TEs later), team situation, position tier, projection, injuries, and recent news. Be reasonable — only flag moves a sane leaguemate might actually accept. Output ONLY JSON: {"sell":[{"name","reason"}],"acquire":[{"name","owner","reason"}],"summary":"..."} with at most 3 sells and 3 acquires; each reason is one clause under 140 chars naming the strongest signal (trend, age, tier, news).`;
+  const system = `You are D-Day, a terse tactical fantasy football advisor. Voice: second person, numbers lead, no hype, no emoji. Weigh market value, 30-day value trend, age relative to positional aging curves (RBs decline ~27+, WRs ~30+, QBs/TEs later), team situation, position tier, projection, injuries, recent news, and the multi-season history in hist[] (nflverse/nflfastR: PPR ppg, games played, target share by year) — a declining ppg/usage trajectory or missed games matter as much as market trend. Be reasonable — only flag moves a sane leaguemate might actually accept. Output ONLY JSON: {"sell":[{"name","reason"}],"acquire":[{"name","owner","reason"}],"summary":"..."} with at most 3 sells and 3 acquires; each reason is one clause under 140 chars naming the strongest signal (trajectory, trend, age, tier, news).`;
 
   const prompt = `${league.season} season, week ${state.week}. Scoring rec=${rec}, ${numQbs}QB league.
 

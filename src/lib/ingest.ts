@@ -119,6 +119,144 @@ export async function ensureWeekProjections(
   return true;
 }
 
+/** Minimal quote-aware CSV line parser (nflverse files are simple). */
+function parseCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQ) {
+      if (c === '"') {
+        if (line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else inQ = false;
+      } else cur += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ",") {
+      out.push(cur);
+      cur = "";
+    } else cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+
+const HISTORY_POS = new Set(["QB", "RB", "WR", "TE"]);
+
+/**
+ * nflverse/nflfastR historical season stats → player_seasons. Static data:
+ * a season already present is skipped unless forced. Matched to Sleeper ids
+ * by normalized name + position.
+ */
+export async function ensurePlayerSeasons(
+  db: SupabaseClient,
+  seasons: number[],
+  force = false,
+): Promise<Record<number, string>> {
+  const summary: Record<number, string> = {};
+  const players = await fetchAll<{ sleeper_id: string; name: string; pos: string }>((from, to) =>
+    db.from("players").select("sleeper_id,name,pos").range(from, to),
+  );
+  const byKey = new Map(players.map((p) => [`${normalizeName(p.name)}:${p.pos}`, p.sleeper_id]));
+
+  for (const season of seasons) {
+    if (!force) {
+      const { count } = await db
+        .from("player_seasons")
+        .select("season", { count: "exact", head: true })
+        .eq("season", season);
+      if ((count ?? 0) > 100) {
+        summary[season] = "present";
+        continue;
+      }
+    }
+    // nflverse moved newer seasons to the stats_player release; try both.
+    const urls = [
+      `https://github.com/nflverse/nflverse-data/releases/download/player_stats/player_stats_season_${season}.csv`,
+      `https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_reg_${season}.csv`,
+    ];
+    let text: string | null = null;
+    let lastStatus = 0;
+    for (const url of urls) {
+      const res = await fetch(url, { next: { revalidate: 0 } });
+      lastStatus = res.status;
+      if (res.ok) {
+        text = await res.text();
+        break;
+      }
+    }
+    if (text == null) {
+      summary[season] = `error: ${lastStatus}`;
+      continue;
+    }
+    const lines = text.split("\n").filter((l) => l.trim());
+    const header = parseCsvLine(lines[0]);
+    const col = (name: string) => header.indexOf(name);
+    const idx = {
+      type: col("season_type"),
+      name: col("player_display_name"),
+      pos: col("position"),
+      team: col("recent_team"),
+      games: col("games"),
+      fpPpr: col("fantasy_points_ppr"),
+      carries: col("carries"),
+      rushYd: col("rushing_yards"),
+      rushTd: col("rushing_tds"),
+      targets: col("targets"),
+      rec: col("receptions"),
+      recYd: col("receiving_yards"),
+      recTd: col("receiving_tds"),
+      passYd: col("passing_yards"),
+      passTd: col("passing_tds"),
+      tgtShare: col("target_share"),
+    };
+    const now = new Date().toISOString();
+    const rows: Record<string, unknown>[] = [];
+    for (const line of lines.slice(1)) {
+      const f = parseCsvLine(line);
+      if (idx.type >= 0 && f[idx.type] !== "REG") continue;
+      const pos = f[idx.pos];
+      if (!HISTORY_POS.has(pos)) continue;
+      const sleeperId = byKey.get(`${normalizeName(f[idx.name])}:${pos}`);
+      if (!sleeperId) continue;
+      const games = Number(f[idx.games]) || 0;
+      const fpPpr = Math.round((Number(f[idx.fpPpr]) || 0) * 10) / 10;
+      rows.push({
+        season,
+        sleeper_id: sleeperId,
+        name: f[idx.name],
+        pos,
+        team: f[idx.team] || null,
+        games,
+        fp_ppr: fpPpr,
+        ppg: games ? Math.round((fpPpr / games) * 10) / 10 : 0,
+        stats: {
+          carries: Number(f[idx.carries]) || 0,
+          rush_yd: Number(f[idx.rushYd]) || 0,
+          rush_td: Number(f[idx.rushTd]) || 0,
+          targets: Number(f[idx.targets]) || 0,
+          rec: Number(f[idx.rec]) || 0,
+          rec_yd: Number(f[idx.recYd]) || 0,
+          rec_td: Number(f[idx.recTd]) || 0,
+          pass_yd: Number(f[idx.passYd]) || 0,
+          pass_td: Number(f[idx.passTd]) || 0,
+          target_share: Math.round((Number(f[idx.tgtShare]) || 0) * 1000) / 1000,
+        },
+        updated_at: now,
+      });
+    }
+    if (!rows.length) {
+      summary[season] = "error: no matched rows";
+      continue;
+    }
+    await chunkedUpsert(db, "player_seasons", rows, "season,sleeper_id");
+    summary[season] = `ingested ${rows.length}`;
+  }
+  return summary;
+}
+
 /** Boris Chen tier scoring buckets and their S3 file suffixes. */
 const BC_SUFFIX: Record<string, string> = { std: "", ppr: "-PPR", half: "-HALF" };
 const BC_BASE = "https://s3-us-west-1.amazonaws.com/fftiers/out";

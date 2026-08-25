@@ -12,7 +12,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ draftId: strin
   try {
     const [draft, picks] = await Promise.all([sleeper.draft(draftId), sleeper.draftPicks(draftId)]);
     if (!draft) return NextResponse.json({ error: "Draft not found." }, { status: 404 });
-    return NextResponse.json({ draft, picks });
+    // serverNow lets the client correct local clock skew so the countdown
+    // tracks Sleeper's own deadline (last_picked + pick_timer).
+    return NextResponse.json({ draft, picks, serverNow: Date.now() });
   } catch {
     return NextResponse.json({ error: "Sleeper is unreachable — try again." }, { status: 502 });
   }

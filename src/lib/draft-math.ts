@@ -140,25 +140,35 @@ export function suggestPicks(
   return eligible
     .slice(0, 40)
     .map((p) => {
-      let score = p.vbd * (lean[p.pos] ?? 1);
-      if (needPositions.has(p.pos)) score += 10;
+      const need = needPositions.has(p.pos);
+      // Needs are a multiplier, not a flat bump — a starter-shaped hole
+      // outweighs a marginal VBD edge at a position you can't start twice.
+      let score = p.vbd * (lean[p.pos] ?? 1) * (need ? 1.25 : 1) + (need ? 8 : 0);
       if (superflex && p.pos === "QB" && (owned.QB ?? 0) < 2) score += 8;
+      // You only start one TE (and one QB in 1QB leagues): once that seat is
+      // filled, a second is trade bait, not lineup points — discount hard.
+      const singleStarter =
+        !need &&
+        ((p.pos === "TE" && (owned.TE ?? 0) >= 1) ||
+          (p.pos === "QB" && !superflex && (owned.QB ?? 0) >= 1));
+      if (singleStarter) score *= p.pos === "TE" ? 0.45 : 0.6;
       // Diminishing returns: starters at this position filled and 2+ spare —
       // a 5th tier-1 RB is worth less to you than balance elsewhere.
-      const stacked =
-        !needPositions.has(p.pos) && (owned[p.pos] ?? 0) >= (directStarters[p.pos] ?? 0) + 2;
+      const stacked = !need && (owned[p.pos] ?? 0) >= (directStarters[p.pos] ?? 0) + 2;
       if (stacked) score *= 0.72;
-      return { p, score, stacked };
+      return { p, score, stacked, singleStarter };
     })
     .sort((a, b) => b.score - a.score)
     .slice(0, count)
-    .map(({ p, stacked }) => {
+    .map(({ p, stacked, singleStarter }) => {
       let why = "Best VBD available.";
       const directNeed = roster.some((s) => s.need && s.slot === p.pos);
       if (mustFill && needPositions.has(p.pos)) {
         why = `${remainingPicks} pick${remainingPicks === 1 ? "" : "s"} left — lock your ${p.pos} starter.`;
       } else if (superflex && p.pos === "QB" && (owned.QB ?? 0) < 2) {
         why = "Superflex — QB2 before the position thins out.";
+      } else if (singleStarter) {
+        why = `Value too big to ignore — but you only start one ${p.pos}.`;
       } else if (p.adpDelta != null && p.adpDelta >= 8) {
         why = `Falling — goes ~${Math.round(p.adp ?? 0)} on average.`;
       } else if (directNeed) {

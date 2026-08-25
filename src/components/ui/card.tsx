@@ -9,11 +9,14 @@ export interface CardProps {
   pad?: boolean;
   /** Amber glow ring — on-the-clock state. */
   glow?: boolean;
+  /** Body becomes a flex column that fills the card — required for children
+   *  that scroll internally (flex chains break at plain block wrappers). */
+  fill?: boolean;
   children?: React.ReactNode;
   style?: React.CSSProperties;
 }
 
-export function Card({ title, action, pad = true, glow, children, style }: CardProps) {
+export function Card({ title, action, pad = true, glow, fill, children, style }: CardProps) {
   return (
     <div
       style={{
@@ -50,7 +53,14 @@ export function Card({ title, action, pad = true, glow, children, style }: CardP
           {action}
         </div>
       )}
-      <div style={{ padding: pad ? "var(--card-pad)" : 0 }}>{children}</div>
+      <div
+        style={{
+          padding: pad ? "var(--card-pad)" : 0,
+          ...(fill ? { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" } : {}),
+        }}
+      >
+        {children}
+      </div>
     </div>
   );
 }

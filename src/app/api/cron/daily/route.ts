@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { sleeper } from "@/lib/sleeper";
-import { ensurePlayers, ensureProjections, ensureAdp, ensureTiers, ensureValues } from "@/lib/ingest";
+import {
+  ensurePlayers,
+  ensureProjections,
+  ensureAdp,
+  ensureTiers,
+  ensureValues,
+  ensurePlayerSeasons,
+} from "@/lib/ingest";
 import { env } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
@@ -48,6 +55,14 @@ export async function GET(req: Request) {
     } catch (e) {
       summary[`values:${numQbs}qb:${ppr}ppr`] = `error: ${e instanceof Error ? e.message : String(e)}`;
     }
+  }
+
+  try {
+    const y = Number(season);
+    const hist = await ensurePlayerSeasons(db, [y - 1, y - 2, y - 3, y - 4]);
+    for (const [s, v] of Object.entries(hist)) summary[`history:${s}`] = v;
+  } catch (e) {
+    summary.history = `error: ${e instanceof Error ? e.message : String(e)}`;
   }
 
   return NextResponse.json({ ok: true, season, ...summary });

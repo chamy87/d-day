@@ -3,7 +3,8 @@
 import React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import type { SuggestResponse } from "@/app/api/draft/suggest/route";
 import { Card } from "@/components/ui/card";
 import { Tag } from "@/components/ui/tag";
 import { Tabs } from "@/components/ui/tabs";
@@ -46,6 +47,13 @@ async function getJson<T>(url: string): Promise<T> {
   const data = await res.json();
   if (!res.ok) throw new Error((data as { error?: string }).error ?? `Request failed (${res.status})`);
   return data as T;
+}
+
+function agoShort(iso: string): string {
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (mins < 60) return `${mins}m ago`;
+  if (mins < 60 * 24) return `${Math.round(mins / 60)}h ago`;
+  return `${Math.round(mins / 1440)}d ago`;
 }
 
 /** Snake pick strip: the next ~14 picks as chips (UX brief item 2). */
@@ -183,12 +191,18 @@ function ExpandedDetail({ p, queued, onQueue }: { p: Ranked; queued: boolean; on
         </div>
       </div>
       {(news.data?.items?.length ?? 0) > 0 && (
-        <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 10 }}>
-          <Tag tone="neutral" style={{ marginRight: 8 }}>
-            NEWS
-          </Tag>
-          {news.data!.items[0].title}
-          <span style={{ color: "var(--text-faint)" }}> ({news.data!.items[0].source})</span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+          {news.data!.items.map((n, i) => (
+            <div key={i} style={{ fontSize: 12, color: "var(--text-muted)" }}>
+              {i === 0 && (
+                <Tag tone="neutral" style={{ marginRight: 8 }}>
+                  NEWS
+                </Tag>
+              )}
+              {n.title}
+              <span style={{ color: "var(--text-faint)" }}> ({n.source})</span>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -206,9 +220,21 @@ export function DraftRoom({ leagueId, draftId: mockDraftId }: { leagueId?: strin
   });
 
   const draftId = mockDraftId ?? board.data?.league.draftId ?? null;
+  // serverNow - clientNow: corrects local clock skew so the countdown tracks
+  // Sleeper's own deadline. Only updated on meaningful drift to avoid churn.
+  const [clockOffset, setClockOffset] = React.useState(0);
   const draftState = useQuery({
     queryKey: ["draft", draftId],
-    queryFn: () => getJson<{ draft: SleeperDraft; picks: SleeperPick[] }>(`/api/draft/${draftId}/picks`),
+    queryFn: async () => {
+      const d = await getJson<{ draft: SleeperDraft; picks: SleeperPick[]; serverNow?: number }>(
+        `/api/draft/${draftId}/picks`,
+      );
+      if (d.serverNow) {
+        const offset = d.serverNow - Date.now();
+        setClockOffset((prev) => (Math.abs(prev - offset) > 500 ? offset : prev));
+      }
+      return d;
+    },
     enabled: !!draftId,
     // Poll cadence follows the league's pick clock: ~1/15th of the timer,
     // clamped to 2–5s while drafting (60s clock → 4s). Paused/pre-draft
@@ -275,13 +301,67 @@ export function DraftRoom({ leagueId, draftId: mockDraftId }: { leagueId?: strin
   // Pick-made trigger: the clock hitting zero means a pick (or autopick) just
   // happened — refetch immediately instead of waiting out the poll interval.
   const lastZeroRefetch = React.useRef(0);
-  const secondsLeftNow = draftState.data ? clockRemaining(draftState.data.draft, now) : null;
+  const secondsLeftNow = draftState.data
+    ? clockRemaining(draftState.data.draft, now + clockOffset)
+    : null;
   React.useEffect(() => {
     if (secondsLeftNow === 0 && Date.now() - lastZeroRefetch.current > 1500) {
       lastZeroRefetch.current = Date.now();
       draftState.refetch();
     }
   }, [secondsLeftNow, draftState]);
+
+  // On-demand AI second opinion over the live draft state (explicit action);
+  // all inputs derive from query data inside the handler so this hook can
+  // safely live above the loading-state early returns.
+  const aiCheck = useMutation({
+    mutationFn: async () => {
+      const b = board.data;
+      const ds = draftState.data;
+      if (!b) throw new Error("Board not loaded yet.");
+      const order = ds?.draft.draft_order ?? {};
+      const slot = myUserId.startsWith("slot:") ? Number(myUserId.slice(5)) || null : (order[myUserId] ?? null);
+      const drafted = new Set((ds?.picks ?? []).map((p) => p.player_id));
+      const myPickList = slot != null ? (ds?.picks ?? []).filter((p) => p.draft_slot === slot) : [];
+      const rosterSlots = fillRoster(b.league.rosterPositions, myPickList);
+      const roundCount = ds?.draft.settings.rounds ?? b.league.rosterPositions.length;
+      const res = await fetch("/api/draft/suggest", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          leagueName: b.league.name,
+          scoring: b.league.scoring,
+          superflex: b.league.superflex,
+          remainingPicks: slot != null ? Math.max(0, roundCount - myPickList.length) : null,
+          roster: rosterSlots.map((s) => ({
+            slot: s.slot,
+            player: s.player
+              ? `${s.player.metadata?.first_name ?? ""} ${s.player.metadata?.last_name ?? ""}`.trim()
+              : null,
+            pos: s.player?.metadata?.position ?? null,
+          })),
+          candidates: b.board
+            .filter((p) => !drafted.has(p.sleeperId))
+            .slice(0, 14)
+            .map((p) => ({
+              sleeperId: p.sleeperId,
+              name: p.name,
+              pos: p.pos,
+              team: p.team,
+              vbd: p.vbd,
+              adp: p.adp,
+              adpDelta: p.adpDelta,
+              tier: p.tier,
+              fc: p.fc ?? null,
+              injury: p.injury,
+            })),
+        }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error((d as { error?: string }).error ?? "AI unavailable.");
+      return d as SuggestResponse;
+    },
+  });
 
   // Draft recap snapshot: once per completed draft, fire-and-forget (the
   // history route dedupes by draftId). (proposals/ACCOUNTS-HISTORY.md item 5)
@@ -392,7 +472,7 @@ export function DraftRoom({ leagueId, draftId: mockDraftId }: { leagueId?: strin
   };
   const untilMe =
     drafting && mySlot != null ? picksUntilSlot(nextPickNo, mySlot, teams, maxPicks) : null;
-  const secondsLeft = draft ? clockRemaining(draft, now) : null;
+  const secondsLeft = draft ? clockRemaining(draft, now + clockOffset) : null;
 
   const myPicks = mySlot != null ? picks.filter((p) => p.draft_slot === mySlot) : [];
   const roster = fillRoster(league.rosterPositions, myPicks);
@@ -463,23 +543,31 @@ export function DraftRoom({ leagueId, draftId: mockDraftId }: { leagueId?: strin
     <Card
       title="Best available"
       pad={false}
+      fill
       style={{
-        flexGrow: isMobile ? 1 : 1,
+        flexGrow: 1,
         flexShrink: 1,
-        flexBasis: "auto",
+        flexBasis: isMobile ? "auto" : "0%",
         display: "flex",
         flexDirection: "column",
         minWidth: 0,
         minHeight: 0,
+        height: isMobile ? "58dvh" : undefined,
       }}
       action={
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <span
+            title={`Board computed ${new Date(board.data!.generatedAt).toLocaleString()}. Projections, ADP, tiers and market values refresh daily (9:00 UTC); the board recomputes at most every 6h.`}
+            style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-faint)", cursor: "help" }}
+          >
+            data {agoShort(board.data!.generatedAt)}
+          </span>
           <Tabs size="sm" items={POS_TABS} value={pos} onChange={setPos} />
           {!isMobile && <Switch checked={hideDrafted} onChange={setHideDrafted} label="Hide drafted" />}
         </div>
       }
     >
-      <div style={{ overflowY: "auto", flex: 1, outline: "none" }} tabIndex={0} onKeyDown={onBoardKeyDown}>
+      <div style={{ overflowY: "auto", flex: 1, minHeight: 0, outline: "none" }} tabIndex={0} onKeyDown={onBoardKeyDown}>
         {isMobile && (
           <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--line-1)" }}>
             <Switch checked={hideDrafted} onChange={setHideDrafted} label="Hide drafted" />
@@ -631,7 +719,34 @@ export function DraftRoom({ leagueId, draftId: mockDraftId }: { leagueId?: strin
   );
 
   const suggestedCard = suggestions.length > 0 && (
-    <Card title="Suggested pick" glow={untilMe === 0} style={{ flexShrink: 0 }}>
+    <Card
+      title="Suggested pick"
+      glow={untilMe === 0}
+      style={{ flexShrink: 0 }}
+      action={
+        <Button variant="ghost" size="sm" onClick={() => aiCheck.mutate()} disabled={aiCheck.isPending}>
+          {aiCheck.isPending ? "AI thinking…" : "AI check"}
+        </Button>
+      }
+    >
+      {aiCheck.isError && (
+        <div style={{ fontSize: 12, color: "var(--reach)", marginBottom: 8 }}>
+          {aiCheck.error instanceof Error ? aiCheck.error.message : "AI unavailable."}
+        </div>
+      )}
+      {aiCheck.data && (
+        <div style={{ borderBottom: "1px solid var(--line-1)", paddingBottom: 10, marginBottom: 10 }}>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>
+            <Tag tone="accent" style={{ marginRight: 6 }}>AI</Tag>
+            {aiCheck.data.strategy}
+          </div>
+          {aiCheck.data.picks.map((p, i) => (
+            <div key={p.name} style={{ fontSize: 12, color: "var(--text-muted)", marginTop: i ? 4 : 0 }}>
+              <b style={{ color: "var(--text-body)" }}>{i + 1}. {p.name}</b> — {p.why}
+            </div>
+          ))}
+        </div>
+      )}
       {suggestions.map((s, i) => (
         <div key={s.player.sleeperId} style={{ marginTop: i ? 12 : 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -721,6 +836,14 @@ export function DraftRoom({ leagueId, draftId: mockDraftId }: { leagueId?: strin
         {untilMe != null && untilMe > 0 && ` · you're up in ${untilMe}`}
         {untilMe === 0 && " · you're up"}
       </span>
+      <IconButton
+        label="Sync now with Sleeper — refetch picks and clock"
+        size="sm"
+        onClick={() => draftState.refetch()}
+        style={{ width: 22, height: 22 }}
+      >
+        <span style={{ fontSize: 12, opacity: draftState.isFetching ? 0.4 : 1 }}>⟳</span>
+      </IconButton>
     </div>
   );
 
