@@ -1,0 +1,16 @@
+# Hourly news ingestion. Vercel's plan limits crons to daily, so the hourly
+# cadence runs here; the Vercel daily cron remains as a backstop.
+name: news-cron
+on:
+  schedule:
+    - cron: "15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refresh news corpus
+        run: |
+          curl -sf -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "https://fantasydday.com/api/cron/frequent"
