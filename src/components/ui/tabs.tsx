@@ -22,6 +22,8 @@ export function Tabs({ items, value, onChange, size = "md", style }: TabsProps) 
         border: "1px solid var(--line-1)",
         borderRadius: "var(--radius-sm)",
         padding: 2,
+        maxWidth: "100%",
+        overflowX: "auto",
         ...style,
       }}
     >

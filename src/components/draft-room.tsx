@@ -24,6 +24,7 @@ import {
   scarcityNote,
   clockRemaining,
 } from "@/lib/draft-math";
+import { useIsMobile } from "@/lib/use-mobile";
 
 const POS_TABS = ["ALL", "QB", "RB", "WR", "TE", "K", "DEF"];
 
@@ -49,6 +50,7 @@ export function DraftRoom({ leagueId }: { leagueId: string }) {
     refetchInterval: (q) => (q.state.data?.draft.status === "drafting" ? 3000 : false),
   });
 
+  const isMobile = useIsMobile();
   const [pos, setPos] = React.useState("ALL");
   const [hideDrafted, setHideDrafted] = React.useState(true);
   const [myUserId, setMyUserId] = React.useState<string>("");
@@ -213,11 +215,29 @@ export function DraftRoom({ leagueId }: { leagueId: string }) {
         />
       </header>
 
-      <div style={{ display: "flex", gap: 14, padding: 14, flex: 1, minHeight: 0, alignItems: "stretch" }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: isMobile ? "column" : "row",
+          gap: 14,
+          padding: 14,
+          flex: 1,
+          minHeight: 0,
+          alignItems: "stretch",
+          overflowY: isMobile ? "auto" : undefined,
+        }}
+      >
         <Card
           title="Best available"
           pad={false}
-          style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}
+          style={{
+            flex: isMobile ? undefined : 1,
+            display: "flex",
+            flexDirection: "column",
+            minWidth: 0,
+            height: isMobile ? "58dvh" : undefined,
+            flexShrink: 0,
+          }}
           action={
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
               <Tabs size="sm" items={POS_TABS} value={pos} onChange={setPos} />
@@ -258,13 +278,13 @@ export function DraftRoom({ leagueId }: { leagueId: string }) {
 
         <div
           style={{
-            width: 320,
+            width: isMobile ? "100%" : 320,
             display: "flex",
             flexDirection: "column",
             gap: 14,
             flexShrink: 0,
             minHeight: 0,
-            overflowY: "auto",
+            overflowY: isMobile ? undefined : "auto",
           }}
         >
           {degraded.length > 0 && (
@@ -344,7 +364,9 @@ export function DraftRoom({ leagueId }: { leagueId: string }) {
             padding: "8px 16px",
             borderTop: "1px solid var(--line-1)",
             background: "var(--surface-panel)",
-            overflow: "hidden",
+            overflowX: "auto",
+            overflowY: "hidden",
+            flexShrink: 0,
           }}
         >
           <span

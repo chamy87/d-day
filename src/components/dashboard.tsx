@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PositionBadge, type Position } from "@/components/ui/position-badge";
 import { StatDelta } from "@/components/ui/stat-delta";
 import { Wordmark } from "@/components/wordmark";
+import { useIsMobile } from "@/lib/use-mobile";
 import type { DashboardResponse, DashboardPlayer } from "@/app/api/league/[id]/dashboard/route";
 import type { Insight } from "@/app/api/league/[id]/insights/route";
 
@@ -63,6 +64,7 @@ function PlayerLine({ p, right }: { p: DashboardPlayer; right?: React.ReactNode 
 }
 
 export function Dashboard({ leagueId }: { leagueId: string }) {
+  const isMobile = useIsMobile();
   const [tab, setTab] = React.useState("START/SIT");
   const [week, setWeek] = React.useState<number | null>(null);
   const [myUserId, setMyUserId] = React.useState("");
@@ -148,6 +150,23 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
   const projTotal = (starters: string[] | undefined) =>
     Math.round((starters ?? []).filter((s) => s && s !== "0").reduce((sum, pid) => sum + (player(pid).proj ?? 0), 0) * 10) / 10;
 
+  const benchCard =
+    myBench.length > 0 ? (
+      <Card title="Bench" pad={false}>
+        {myBench.map((p, i) => (
+          <PlayerLine
+            key={`${p.id}-${i}`}
+            p={p}
+            right={
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--text-muted)" }}>
+                {p.proj != null ? p.proj.toFixed(1) : "—"}
+              </span>
+            }
+          />
+        ))}
+      </Card>
+    ) : null;
+
   const myNames = new Set((myRoster?.players ?? []).map((pid) => player(pid).name.toLowerCase()));
   const newsItems = myRoster
     ? data.news.filter((n) => {
@@ -211,8 +230,15 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
         )}
 
         {tab === "START/SIT" && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 14, alignItems: "start" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isMobile ? "1fr" : "1fr 320px",
+              gap: 14,
+              alignItems: "start",
+            }}
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: 14, order: isMobile ? 0 : undefined }}>
               <Card title={`Your starters — projected (${data.league.scoring})`} pad={false}>
                 {myStarters.length ? (
                   myStarters.map((p, i) => (
@@ -232,21 +258,7 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
                   </div>
                 )}
               </Card>
-              {myBench.length > 0 && (
-                <Card title="Bench" pad={false}>
-                  {myBench.map((p, i) => (
-                    <PlayerLine
-                      key={`${p.id}-${i}`}
-                      p={p}
-                      right={
-                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--text-muted)" }}>
-                          {p.proj != null ? p.proj.toFixed(1) : "—"}
-                        </span>
-                      }
-                    />
-                  ))}
-                </Card>
-              )}
+              {!isMobile && benchCard}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <Card title="Flags">
@@ -271,12 +283,21 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
                   )}
                 </div>
               </Card>
+              {isMobile && benchCard}
             </div>
           </div>
         )}
 
         {tab === "MATCHUP" && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, alignItems: "start", maxWidth: 900 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+              gap: 14,
+              alignItems: "start",
+              maxWidth: 900,
+            }}
+          >
             {[
               { roster: myRoster, m: myMatchup, label: myRoster ? nameOfRoster(myRoster.rosterId) : "Your team" },
               { roster: oppRoster ?? null, m: oppMatchup, label: oppRoster ? nameOfRoster(oppRoster.rosterId) : "Opponent" },

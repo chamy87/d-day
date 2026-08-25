@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Tag } from "@/components/ui/tag";
 import { PositionBadge, toPosition } from "@/components/ui/position-badge";
 import { Wordmark } from "@/components/wordmark";
+import { Turnstile } from "@/components/turnstile";
 import type { LeagueSummary } from "@/app/api/league/[id]/route";
 
 const STATUS_TAG: Record<string, { tone: "accent" | "value" | "neutral"; label: string }> = {
@@ -17,21 +18,37 @@ const STATUS_TAG: Record<string, { tone: "accent" | "value" | "neutral"; label: 
   complete: { tone: "neutral", label: "COMPLETE" },
 };
 
-export function Landing() {
+export function Landing({ turnstileSiteKey }: { turnstileSiteKey: string | null }) {
   const router = useRouter();
   const [id, setId] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [league, setLeague] = React.useState<LeagueSummary | null>(null);
+  const [token, setToken] = React.useState<string | null>(null);
+  const resetTurnstile = React.useRef<(() => void) | null>(null);
+  const onToken = React.useCallback((t: string | null) => setToken(t), []);
+
+  const verifying = !!turnstileSiteKey && !token;
+  const [slowVerify, setSlowVerify] = React.useState(false);
+  React.useEffect(() => {
+    if (!verifying) {
+      setSlowVerify(false);
+      return;
+    }
+    const t = setTimeout(() => setSlowVerify(true), 12000);
+    return () => clearTimeout(t);
+  }, [verifying]);
 
   const lookup = async () => {
     const trimmed = id.trim();
-    if (!trimmed || loading) return;
+    if (!trimmed || loading || verifying) return;
     setLoading(true);
     setError(null);
     setLeague(null);
     try {
-      const res = await fetch(`/api/league/${encodeURIComponent(trimmed)}`);
+      const res = await fetch(`/api/league/${encodeURIComponent(trimmed)}`, {
+        headers: token ? { "x-turnstile-token": token } : {},
+      });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error ?? "Lookup failed — try again.");
@@ -42,6 +59,7 @@ export function Landing() {
       setError("Lookup failed — try again.");
     } finally {
       setLoading(false);
+      resetTurnstile.current?.(); // tokens are single-use
     }
   };
 
@@ -79,20 +97,30 @@ export function Landing() {
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 10, alignItems: "flex-end", width: "100%", maxWidth: 480 }}>
-        <Input
-          label="Sleeper league ID"
-          mono
-          size="lg"
-          placeholder="992093874321055744"
-          value={id}
-          onChange={(e) => setId(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && lookup()}
-          style={{ flex: 1 }}
-        />
-        <Button variant="primary" size="lg" onClick={lookup} disabled={loading}>
-          {loading ? "Finding…" : "Find league"}
-        </Button>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%", maxWidth: 480 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <Input
+            label="Sleeper league ID"
+            mono
+            size="lg"
+            placeholder="992093874321055744"
+            value={id}
+            onChange={(e) => setId(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && lookup()}
+            style={{ flex: 1, minWidth: 220 }}
+          />
+          <Button variant="primary" size="lg" onClick={lookup} disabled={loading || verifying}>
+            {loading ? "Finding…" : verifying ? "Verifying…" : "Find league"}
+          </Button>
+        </div>
+        {turnstileSiteKey && (
+          <Turnstile siteKey={turnstileSiteKey} onToken={onToken} resetRef={resetTurnstile} />
+        )}
+        {slowVerify && (
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-faint)" }}>
+            Human check hasn&apos;t loaded — an ad blocker may be in the way. Reload to retry.
+          </div>
+        )}
       </div>
 
       {error && (
