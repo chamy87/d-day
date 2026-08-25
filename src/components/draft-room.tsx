@@ -25,6 +25,8 @@ import {
   clockRemaining,
 } from "@/lib/draft-math";
 import { useIsMobile } from "@/lib/use-mobile";
+import { loadTeamPref, saveTeamPref } from "@/lib/session-client";
+import Link from "next/link";
 
 const POS_TABS = ["ALL", "QB", "RB", "WR", "TE", "K", "DEF"];
 
@@ -35,14 +37,16 @@ async function getJson<T>(url: string): Promise<T> {
   return data as T;
 }
 
-export function DraftRoom({ leagueId }: { leagueId: string }) {
+export function DraftRoom({ leagueId, draftId: mockDraftId }: { leagueId?: string; draftId?: string }) {
+  const scope = leagueId ?? `draft:${mockDraftId}`;
   const board = useQuery({
-    queryKey: ["board", leagueId],
-    queryFn: () => getJson<BoardResponse>(`/api/board/${leagueId}`),
+    queryKey: ["board", scope],
+    queryFn: () =>
+      getJson<BoardResponse>(leagueId ? `/api/board/${leagueId}` : `/api/board/by-draft/${mockDraftId}`),
     staleTime: 5 * 60 * 1000,
   });
 
-  const draftId = board.data?.league.draftId ?? null;
+  const draftId = mockDraftId ?? board.data?.league.draftId ?? null;
   const draftState = useQuery({
     queryKey: ["draft", draftId],
     queryFn: () => getJson<{ draft: SleeperDraft; picks: SleeperPick[] }>(`/api/draft/${draftId}/picks`),
@@ -55,16 +59,21 @@ export function DraftRoom({ leagueId }: { leagueId: string }) {
   const [hideDrafted, setHideDrafted] = React.useState(true);
   const [myUserId, setMyUserId] = React.useState<string>("");
 
-  // Remember the chosen team per league (no-login product). localStorage is
-  // client-only, so this must run post-hydration rather than in an initializer.
+  // Remember the chosen team per league in the anonymous server session
+  // (cookie-keyed, per browser — concurrent users never collide), with
+  // localStorage as the fast/fallback layer.
   React.useEffect(() => {
-    const stored = localStorage.getItem(`dday:team:${leagueId}`);
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- SSR-safe localStorage hydration
-    if (stored) setMyUserId(stored);
-  }, [leagueId]);
+    let cancelled = false;
+    loadTeamPref(scope).then((stored) => {
+      if (stored && !cancelled) setMyUserId(stored);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [scope]);
   const chooseTeam = (id: string) => {
     setMyUserId(id);
-    localStorage.setItem(`dday:team:${leagueId}`, id);
+    saveTeamPref(scope, id);
   };
 
   // 1s clock tick while drafting.
@@ -115,18 +124,25 @@ export function DraftRoom({ leagueId }: { leagueId: string }) {
   const orderedUsers = users
     .filter((u) => u.userId in draftOrder)
     .sort((a, b) => (draftOrder[a.userId] ?? 99) - (draftOrder[b.userId] ?? 99));
-  const teamOptions = (orderedUsers.length ? orderedUsers : users).map((u) => ({
-    value: u.userId,
-    label: u.teamName ?? u.name,
-  }));
-  const mySlot = draftOrder[myUserId] ?? null;
+  // Mock drafts have no league users — pick by draft slot instead.
+  const teamOptions = (orderedUsers.length ? orderedUsers : users).length
+    ? (orderedUsers.length ? orderedUsers : users).map((u) => ({
+        value: u.userId,
+        label: u.teamName ?? u.name,
+      }))
+    : Array.from({ length: teams }, (_, i) => ({ value: `slot:${i + 1}`, label: `Slot ${i + 1}` }));
+  const mySlot = myUserId.startsWith("slot:")
+    ? Number(myUserId.slice(5)) || null
+    : (draftOrder[myUserId] ?? null);
 
   const nextPickNo = picks.length + 1;
   const onClockSlot = drafting ? slotForPick(nextPickNo, teams) : null;
   const slotToUser = new Map(Object.entries(draftOrder).map(([uid, slot]) => [slot, uid]));
-  const nameOf = (uid: string | undefined) => {
+  const nameOfSlot = (slot: number | undefined) => {
+    if (slot == null) return "—";
+    const uid = slotToUser.get(slot);
     const u = users.find((x) => x.userId === uid);
-    return u?.teamName ?? u?.name ?? "—";
+    return u?.teamName ?? u?.name ?? `Slot ${slot}`;
   };
   const untilMe =
     drafting && mySlot != null ? picksUntilSlot(nextPickNo, mySlot, teams, maxPicks) : null;
@@ -162,7 +178,9 @@ export function DraftRoom({ leagueId }: { leagueId: string }) {
           flexWrap: "wrap",
         }}
       >
-        <Wordmark size={20} />
+        <Link href="/" title="Home — look up another league" style={{ textDecoration: "none", color: "inherit" }}>
+          <Wordmark size={20} />
+        </Link>
         <span style={{ fontSize: 13, color: "var(--text-muted)" }}>{league.name}</span>
         <Tag>{league.scoring}</Tag>
         {league.superflex && <Tag>Superflex</Tag>}
@@ -197,16 +215,18 @@ export function DraftRoom({ leagueId }: { leagueId: string }) {
               </span>
             )}
             <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-              {pickLabel(nextPickNo, teams)} · {nameOf(slotToUser.get(onClockSlot ?? -1))}
+              {pickLabel(nextPickNo, teams)} · {nameOfSlot(onClockSlot ?? undefined)}
               {untilMe != null && untilMe > 0 && ` · you're up in ${untilMe}`}
               {untilMe === 0 && " · you're up"}
             </span>
           </div>
         )}
         {!drafting && draft && <Tag tone={draft.status === "complete" ? "neutral" : "accent"}>{draft.status.replace("_", "-").toUpperCase()}</Tag>}
-        <a href={`/league/${leagueId}`} style={{ fontSize: 13, color: "var(--text-muted)" }}>
-          Dashboard →
-        </a>
+        {leagueId && (
+          <a href={`/league/${leagueId}`} style={{ fontSize: 13, color: "var(--text-muted)" }}>
+            Dashboard →
+          </a>
+        )}
         <Select
           options={[{ value: "", label: "Pick your team…" }, ...teamOptions]}
           value={myUserId}
@@ -400,7 +420,7 @@ export function DraftRoom({ leagueId }: { leagueId: string }) {
               <b style={{ color: "var(--text-body)", fontWeight: 600 }}>
                 {p.metadata?.first_name} {p.metadata?.last_name}
               </b>
-              <span style={{ color: "var(--text-faint)" }}>{nameOf(slotToUser.get(p.draft_slot))}</span>
+              <span style={{ color: "var(--text-faint)" }}>{nameOfSlot(p.draft_slot)}</span>
             </span>
           ))}
         </footer>

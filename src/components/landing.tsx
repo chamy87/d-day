@@ -24,6 +24,14 @@ export function Landing({ turnstileSiteKey }: { turnstileSiteKey: string | null 
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [league, setLeague] = React.useState<LeagueSummary | null>(null);
+  const [mock, setMock] = React.useState<{
+    draftId: string;
+    name: string;
+    teams: number;
+    rounds: number | null;
+    scoringType: string;
+    status: string;
+  } | null>(null);
   const [token, setToken] = React.useState<string | null>(null);
   const resetTurnstile = React.useRef<(() => void) | null>(null);
   const onToken = React.useCallback((t: string | null) => setToken(t), []);
@@ -31,13 +39,11 @@ export function Landing({ turnstileSiteKey }: { turnstileSiteKey: string | null 
   const verifying = !!turnstileSiteKey && !token;
   const [slowVerify, setSlowVerify] = React.useState(false);
   React.useEffect(() => {
-    if (!verifying) {
-      setSlowVerify(false);
-      return;
-    }
+    if (!verifying) return;
     const t = setTimeout(() => setSlowVerify(true), 12000);
     return () => clearTimeout(t);
   }, [verifying]);
+  const showSlowHint = slowVerify && verifying;
 
   const lookup = async () => {
     const trimmed = id.trim();
@@ -45,15 +51,39 @@ export function Landing({ turnstileSiteKey }: { turnstileSiteKey: string | null 
     setLoading(true);
     setError(null);
     setLeague(null);
+    setMock(null);
     try {
       const res = await fetch(`/api/league/${encodeURIComponent(trimmed)}`, {
         headers: token ? { "x-turnstile-token": token } : {},
       });
       const data = await res.json();
-      if (!res.ok) {
-        setError(data.error ?? "Lookup failed — try again.");
-      } else {
+      if (res.ok) {
         setLeague(data as LeagueSummary);
+      } else if (res.status === 404) {
+        // Not a league — maybe a mock draft id.
+        const dres = await fetch(`/api/draft/${encodeURIComponent(trimmed)}/picks`);
+        if (dres.ok) {
+          const d = (await dres.json()) as {
+            draft: {
+              draft_id: string;
+              status: string;
+              metadata?: { name?: string; scoring_type?: string } | null;
+              settings: { teams: number; rounds?: number };
+            };
+          };
+          setMock({
+            draftId: d.draft.draft_id,
+            name: d.draft.metadata?.name || "Mock draft",
+            teams: d.draft.settings.teams,
+            rounds: d.draft.settings.rounds ?? null,
+            scoringType: (d.draft.metadata?.scoring_type ?? "ppr").replace("_", " "),
+            status: d.draft.status,
+          });
+        } else {
+          setError("No league or mock draft found with that ID.");
+        }
+      } else {
+        setError(data.error ?? "Lookup failed — try again.");
       }
     } catch {
       setError("Lookup failed — try again.");
@@ -92,8 +122,8 @@ export function Landing({ turnstileSiteKey }: { turnstileSiteKey: string | null 
           Fantasy football draft assistant
         </div>
         <div style={{ fontSize: 15, color: "var(--text-muted)", marginTop: 14, maxWidth: 440 }}>
-          Paste your Sleeper league ID. No login, no setup — rankings tuned to your league&apos;s
-          exact scoring and roster.
+          Paste your Sleeper league ID — or a mock draft ID to test drive. No login, no setup —
+          rankings tuned to your league&apos;s exact scoring and roster.
         </div>
       </div>
 
@@ -116,7 +146,7 @@ export function Landing({ turnstileSiteKey }: { turnstileSiteKey: string | null 
         {turnstileSiteKey && (
           <Turnstile siteKey={turnstileSiteKey} onToken={onToken} resetRef={resetTurnstile} />
         )}
-        {slowVerify && (
+        {showSlowHint && (
           <div style={{ fontSize: "var(--text-xs)", color: "var(--text-faint)" }}>
             Human check hasn&apos;t loaded — an ad blocker may be in the way. Reload to retry.
           </div>
@@ -125,6 +155,28 @@ export function Landing({ turnstileSiteKey }: { turnstileSiteKey: string | null 
 
       {error && (
         <div style={{ fontSize: "var(--text-sm)", color: "var(--reach)" }}>{error}</div>
+      )}
+
+      {mock && (
+        <Card
+          title="Mock draft detected"
+          style={{ width: "100%", maxWidth: 480 }}
+          action={<Tag tone={mock.status === "drafting" ? "accent" : "neutral"}>{mock.status.replace("_", "-").toUpperCase()}</Tag>}
+        >
+          <div style={{ fontFamily: "var(--font-display)", fontStretch: "125%", fontWeight: 850, fontSize: 20 }}>
+            {mock.name}
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+            <Tag>{mock.teams} teams</Tag>
+            <Tag>{mock.scoringType}</Tag>
+            {mock.rounds && <Tag>{mock.rounds} rounds</Tag>}
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <Button variant="primary" style={{ width: "100%" }} onClick={() => router.push(`/draft/${mock.draftId}`)}>
+              Enter mock draft room →
+            </Button>
+          </div>
+        </Card>
       )}
 
       {league && status && (

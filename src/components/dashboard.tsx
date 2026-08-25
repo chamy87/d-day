@@ -13,10 +13,12 @@ import { PositionBadge, type Position } from "@/components/ui/position-badge";
 import { StatDelta } from "@/components/ui/stat-delta";
 import { Wordmark } from "@/components/wordmark";
 import { useIsMobile } from "@/lib/use-mobile";
+import { loadTeamPref, saveTeamPref } from "@/lib/session-client";
+import { AdvisorTab } from "@/components/advisor";
 import type { DashboardResponse, DashboardPlayer } from "@/app/api/league/[id]/dashboard/route";
 import type { Insight } from "@/app/api/league/[id]/insights/route";
 
-const TABS = ["START/SIT", "MATCHUP", "WAIVERS", "NEWS"];
+const TABS = ["START/SIT", "MATCHUP", "WAIVERS", "ADVISOR", "NEWS"];
 
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
@@ -70,13 +72,17 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
   const [myUserId, setMyUserId] = React.useState("");
 
   React.useEffect(() => {
-    const stored = localStorage.getItem(`dday:team:${leagueId}`);
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- SSR-safe localStorage hydration
-    if (stored) setMyUserId(stored);
+    let cancelled = false;
+    loadTeamPref(leagueId).then((stored) => {
+      if (stored && !cancelled) setMyUserId(stored);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [leagueId]);
   const chooseTeam = (id: string) => {
     setMyUserId(id);
-    localStorage.setItem(`dday:team:${leagueId}`, id);
+    saveTeamPref(leagueId, id);
   };
 
   const dash = useQuery({
@@ -188,7 +194,9 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
           flexWrap: "wrap",
         }}
       >
-        <Wordmark size={20} />
+        <Link href="/" title="Home — look up another league" style={{ textDecoration: "none", color: "inherit" }}>
+          <Wordmark size={20} />
+        </Link>
         <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
           {data.league.name} · Week {data.week}
         </span>
@@ -366,6 +374,10 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
               </div>
             )}
           </Card>
+        )}
+
+        {tab === "ADVISOR" && (
+          <AdvisorTab leagueId={leagueId} data={data} myRosterId={myRoster?.rosterId ?? null} isMobile={isMobile} />
         )}
 
         {tab === "NEWS" && (

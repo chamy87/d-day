@@ -21,13 +21,14 @@ export type SleeperUser = {
 
 export type SleeperDraft = {
   draft_id: string;
-  league_id: string;
+  league_id: string | null; // null for mock drafts
   status: string; // pre_draft | drafting | paused | complete
   type: string; // snake | linear | auction
   start_time: number | null;
   last_picked: number | null;
   draft_order: Record<string, number> | null; // user_id -> slot
-  settings: { teams: number; pick_timer?: number; rounds?: number };
+  metadata?: { scoring_type?: string; name?: string } | null;
+  settings: { teams: number; pick_timer?: number; rounds?: number } & Record<string, number | undefined>;
 };
 
 export type SleeperPick = {
@@ -121,6 +122,39 @@ export function ffcFormat(scoring: Record<string, number>, superflex: boolean): 
 export function ffcTeams(teams: number): number {
   const options = [8, 10, 12, 14];
   return options.reduce((a, b) => (Math.abs(b - teams) < Math.abs(a - teams) ? b : a));
+}
+
+/** Canonical scoring presets for mock drafts (no league scoring_settings). */
+export function presetScoring(scoringType: string | undefined): Record<string, number> {
+  const rec = scoringType === "ppr" || scoringType === "2qb" ? 1 : scoringType === "half_ppr" ? 0.5 : 0;
+  return {
+    pass_yd: 0.04, pass_td: 4, pass_int: -1, pass_2pt: 2,
+    rush_yd: 0.1, rush_td: 6, rush_2pt: 2,
+    rec, rec_yd: 0.1, rec_td: 6, rec_2pt: 2,
+    fum_lost: -2,
+    fgm_0_19: 3, fgm_20_29: 3, fgm_30_39: 3, fgm_40_49: 4, fgm_50p: 5, xpm: 1, fgmiss: -1,
+    def_td: 6, sack: 1, int: 2, fum_rec: 2, safe: 2, blk_kick: 2,
+    pts_allow_0: 10, pts_allow_1_6: 7, pts_allow_7_13: 4, pts_allow_14_20: 1, pts_allow_21_27: 0,
+    pts_allow_28_34: -1, pts_allow_35p: -4,
+  };
+}
+
+/** Roster slots for a draft without a league, from its slots_* settings. */
+export function draftRosterPositions(settings: SleeperDraft["settings"]): string[] {
+  const out: string[] = [];
+  const push = (slot: string, n: number | undefined) => {
+    for (let i = 0; i < (n ?? 0); i++) out.push(slot);
+  };
+  push("QB", settings.slots_qb);
+  push("RB", settings.slots_rb);
+  push("WR", settings.slots_wr);
+  push("TE", settings.slots_te);
+  push("FLEX", settings.slots_flex);
+  push("SUPER_FLEX", settings.slots_super_flex);
+  push("K", settings.slots_k);
+  push("DEF", settings.slots_def);
+  push("BN", settings.slots_bn);
+  return out.length ? out : ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "K", "DEF", "BN", "BN", "BN", "BN", "BN", "BN"];
 }
 
 export function injuryTag(injuryStatus: string | null | undefined): string | null {

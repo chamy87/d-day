@@ -41,8 +41,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     return NextResponse.json({ error: "That doesn't look like a Sleeper league ID." }, { status: 400 });
   }
 
-  // Turnstile bot check — enforced only when the secret is configured.
-  const turnstileSecret = process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY;
+  // Turnstile bot check — enforced only on production, where the widget's
+  // domain allowlist (fantasydday.com) can actually issue tokens.
+  const turnstileSecret =
+    process.env.VERCEL_ENV === "production" ? process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY : undefined;
   if (turnstileSecret) {
     const token = req.headers.get("x-turnstile-token");
     const fail = () =>

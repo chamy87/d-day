@@ -170,7 +170,13 @@ export async function ensureValues(db: SupabaseClient, numQbs: 1 | 2, ppr: 0 | 0
     { next: { revalidate: 0 } },
   );
   if (!res.ok) throw new Error(`FantasyCalc → ${res.status}`);
-  const data = (await res.json()) as { player: { sleeperId: string | null }; value: number }[];
+  const data = (await res.json()) as {
+    player: { sleeperId: string | null; maybeAge: number | null };
+    value: number;
+    trend30Day: number | null;
+    overallRank: number | null;
+    positionRank: number | null;
+  }[];
   const now = new Date().toISOString();
   const rows = data
     .filter((d) => d.player?.sleeperId)
@@ -179,6 +185,10 @@ export async function ensureValues(db: SupabaseClient, numQbs: 1 | 2, ppr: 0 | 0
       num_qbs: numQbs,
       ppr,
       value: d.value,
+      trend30: d.trend30Day,
+      overall_rank: d.overallRank,
+      pos_rank: d.positionRank,
+      age: d.player.maybeAge,
       updated_at: now,
     }));
   if (!rows.length) throw new Error("FantasyCalc returned no matched players");

@@ -56,6 +56,49 @@ async function fetchFeed(source: string, url: string): Promise<NewsItem[]> {
   });
 }
 
+/**
+ * Cron ingestion: fetch all feeds and store items in news_cache with
+ * player_ids tagged by full-name match against the players table. This is
+ * the corpus the AI advisor reads (news_cache.player_ids has a GIN index).
+ */
+export async function ingestNews(db: SupabaseClient): Promise<{ stored: number; tagged: number }> {
+  const results = await Promise.allSettled(FEEDS.map((f) => fetchFeed(f.source, f.url)));
+  const all: NewsItem[] = [];
+  for (const r of results) if (r.status === "fulfilled") all.push(...r.value);
+  if (!all.length) throw new Error("all news feeds failed");
+
+  const players: { sleeper_id: string; name: string }[] = [];
+  for (let page = 0; ; page++) {
+    const { data } = await db
+      .from("players")
+      .select("sleeper_id,name")
+      .range(page * 1000, page * 1000 + 999);
+    if (!data?.length) break;
+    players.push(...data);
+    if (data.length < 1000) break;
+  }
+
+  let tagged = 0;
+  const rows = all.map((i) => {
+    const t = i.title.toLowerCase();
+    const ids = players.filter((p) => p.name.length > 5 && t.includes(p.name.toLowerCase())).map((p) => p.sleeper_id);
+    if (ids.length) tagged++;
+    return {
+      id: i.id,
+      source: i.source,
+      title: i.title,
+      url: i.url,
+      player_ids: ids,
+      published_at: i.publishedAt,
+    };
+  });
+  for (let i = 0; i < rows.length; i += 200) {
+    const { error } = await db.from("news_cache").upsert(rows.slice(i, i + 200), { onConflict: "id" });
+    if (error) throw new Error(error.message);
+  }
+  return { stored: rows.length, tagged };
+}
+
 /** Fetch all feeds (fail-soft per feed), filter to relevant player names. */
 export async function relevantNews(
   db: SupabaseClient,
