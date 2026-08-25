@@ -6,9 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:push": "sh -c 'set -a; . ./.env.local; set +a; supabase db push --db-url \"$SUPABASE_DB_URL\"'"
   },
   "dependencies": {
+    "@sentry/nextjs": "^10.71.0",
     "@supabase/supabase-js": "^2.112.4",
     "@tanstack/react-query": "^5.102.3",
     "next": "16.3.2",
