@@ -10,6 +10,7 @@
     "db:push": "sh -c 'set -a; . ./.env.local; set +a; supabase db push --db-url \"$SUPABASE_DB_URL\"'"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.120.0",
     "@sentry/nextjs": "^10.71.0",
     "@supabase/supabase-js": "^2.112.4",
     "@tanstack/react-query": "^5.102.3",
