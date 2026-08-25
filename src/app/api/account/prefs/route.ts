@@ -1,26 +1,24 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { ensureSid, withSidCookie } from "@/lib/identity";
+import { getCaller } from "@/lib/identity";
 
 export const dynamic = "force-dynamic";
 
-/**
- * Anonymous per-browser session (no-login product). The httpOnly cookie keys
- * a prefs row in Supabase so concurrent users never collide and choices
- * survive localStorage wipes. Signed-in users use /api/account/prefs instead.
- */
-export async function GET() {
-  const { sid, isNew } = await ensureSid();
-  let data: Record<string, unknown> = {};
-  if (!isNew) {
-    const { data: row } = await supabaseAdmin().from("sessions").select("data").eq("sid", sid).maybeSingle();
-    data = (row?.data as Record<string, unknown>) ?? {};
-  }
-  return withSidCookie(NextResponse.json({ data }), sid);
+/** Signed-in twin of /api/session: prefs live in profiles.data. */
+export async function GET(req: Request) {
+  const caller = await getCaller(req);
+  if (!caller.userId) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+  const { data: row } = await supabaseAdmin()
+    .from("profiles")
+    .select("data")
+    .eq("user_id", caller.userId)
+    .maybeSingle();
+  return NextResponse.json({ data: (row?.data as Record<string, unknown>) ?? {} });
 }
 
 export async function PUT(req: Request) {
-  const { sid } = await ensureSid();
+  const caller = await getCaller(req);
+  if (!caller.userId) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
   let merge: Record<string, unknown>;
   try {
     merge = ((await req.json()) as { merge?: Record<string, unknown> }).merge ?? {};
@@ -29,9 +27,8 @@ export async function PUT(req: Request) {
   }
 
   const db = supabaseAdmin();
-  const { data: row } = await db.from("sessions").select("data").eq("sid", sid).maybeSingle();
+  const { data: row } = await db.from("profiles").select("data").eq("user_id", caller.userId).maybeSingle();
   const current = (row?.data as Record<string, unknown>) ?? {};
-  // Shallow merge per top-level key; one level deep for objects (e.g. teams map).
   const next: Record<string, unknown> = { ...current };
   for (const [k, v] of Object.entries(merge)) {
     if (v && typeof v === "object" && !Array.isArray(v) && typeof next[k] === "object" && next[k] !== null) {
@@ -40,9 +37,7 @@ export async function PUT(req: Request) {
       next[k] = v;
     }
   }
-  await db
-    .from("sessions")
-    .upsert({ sid, data: next, updated_at: new Date().toISOString() });
+  await db.from("profiles").upsert({ user_id: caller.userId, data: next, updated_at: new Date().toISOString() });
 
   // Claimed-team changes ride along into the recent-leagues rows.
   const teams = merge.teams as Record<string, string> | undefined;
@@ -51,10 +46,10 @@ export async function PUT(req: Request) {
       await db
         .from("user_leagues")
         .update({ team_id: teamId })
-        .eq("sid", sid)
+        .eq("user_id", caller.userId)
         .eq("league_id", leagueId)
         .then(() => undefined, () => undefined);
     }
   }
-  return withSidCookie(NextResponse.json({ data: next }), sid);
+  return NextResponse.json({ data: next });
 }

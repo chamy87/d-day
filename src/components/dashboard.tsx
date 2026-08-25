@@ -17,6 +17,9 @@ import { loadTeamPref, saveTeamPref } from "@/lib/session-client";
 import { AdvisorTab } from "@/components/advisor";
 import { TeamPickerModal, TeamChip } from "@/components/team-picker-modal";
 import { GlossaryButton } from "@/components/glossary";
+import { AccountButton } from "@/components/account";
+import { authFetch } from "@/lib/auth-client";
+import type { HistoryItem } from "@/app/api/history/route";
 import { useRouter } from "next/navigation";
 import type { DashboardResponse, DashboardPlayer } from "@/app/api/league/[id]/dashboard/route";
 import type { Insight } from "@/app/api/league/[id]/insights/route";
@@ -106,6 +109,16 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
   const myTeamLabel = data?.users.find((u) => u.userId === myUserId)
     ? (data.users.find((u) => u.userId === myUserId)!.teamName ?? data.users.find((u) => u.userId === myUserId)!.name)
     : null;
+
+  const recap = useQuery({
+    queryKey: ["recap", leagueId],
+    queryFn: async () => {
+      const res = await authFetch(`/api/history?league=${encodeURIComponent(leagueId)}&kind=draft_recap&limit=1`);
+      const d = (await res.json()) as { items?: HistoryItem[] };
+      return d.items?.[0] ?? null;
+    },
+    staleTime: 10 * 60 * 1000,
+  });
 
   const insights = useQuery({
     queryKey: ["insights", leagueId, data?.week, myRoster?.rosterId],
@@ -248,6 +261,7 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
           </button>
         )}
         <GlossaryButton />
+        <AccountButton leagueId={leagueId} />
       </header>
 
       {(pickerOpen || (prefsLoaded && !myUserId && !pickerDismissed && data.users.length > 0)) && (
@@ -343,6 +357,53 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
                   )}
                 </div>
               </Card>
+              {recap.data && (
+                <Card title={`Draft recap${(recap.data.payload as { season?: string }).season ? ` · ${(recap.data.payload as { season?: string }).season}` : ""}`}>
+                  {(() => {
+                    const p = recap.data.payload as {
+                      grade?: string;
+                      totalVbd?: number;
+                      steal?: number;
+                      bestPick?: { name: string; label: string };
+                      biggestReach?: { name: string; label: string };
+                    };
+                    return (
+                      <>
+                        <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "baseline" }}>
+                          {p.grade && (
+                            <span
+                              style={{
+                                fontFamily: "var(--font-display)",
+                                fontStretch: "125%",
+                                fontWeight: 850,
+                                fontSize: 34,
+                                color: "var(--accent)",
+                                lineHeight: 1,
+                              }}
+                            >
+                              {p.grade}
+                            </span>
+                          )}
+                          {[
+                            ["VALUE VS ADP", p.steal != null ? `+${p.steal}` : "—"],
+                            ["VBD", p.totalVbd != null ? `+${p.totalVbd}` : "—"],
+                            ["BEST PICK", p.bestPick ? `${p.bestPick.name} ${p.bestPick.label}` : "—"],
+                            ["BIGGEST REACH", p.biggestReach ? `${p.biggestReach.name} ${p.biggestReach.label}` : "—"],
+                          ].map(([l, v]) => (
+                            <div key={l}>
+                              <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: ".08em", color: "var(--text-faint)" }}>{l}</div>
+                              <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 600, marginTop: 2 }}>{v}</div>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 10 }}>
+                          Snapshotted when your draft completed. Full pick-by-pick grades live in the draft room.
+                        </div>
+                      </>
+                    );
+                  })()}
+                </Card>
+              )}
               {isMobile && benchCard}
             </div>
           </div>

@@ -34,6 +34,8 @@ import { useIsMobile } from "@/lib/use-mobile";
 import { loadTeamPref, saveTeamPref, loadQueuePref, saveQueuePref } from "@/lib/session-client";
 import { teamInitials } from "@/components/team-picker-modal";
 import { GlossaryButton } from "@/components/glossary";
+import { AccountButton } from "@/components/account";
+import { authFetch } from "@/lib/auth-client";
 
 const POS_TABS = ["ALL", "QB", "RB", "WR", "TE", "K", "DEF"];
 const MOBILE_PANES = ["BOARD", "QUEUE", "ROSTER", "PICKS"] as const;
@@ -280,6 +282,50 @@ export function DraftRoom({ leagueId, draftId: mockDraftId }: { leagueId?: strin
       draftState.refetch();
     }
   }, [secondsLeftNow, draftState]);
+
+  // Draft recap snapshot: once per completed draft, fire-and-forget (the
+  // history route dedupes by draftId). (proposals/ACCOUNTS-HISTORY.md item 5)
+  const recapPosted = React.useRef(false);
+  React.useEffect(() => {
+    const b = board.data;
+    const ds = draftState.data;
+    if (!b || !ds || ds.draft.status !== "complete" || !ds.picks.length || !draftId || recapPosted.current) return;
+    const order = ds.draft.draft_order ?? {};
+    const slot = myUserId.startsWith("slot:") ? Number(myUserId.slice(5)) || null : (order[myUserId] ?? null);
+    if (slot == null) return;
+    recapPosted.current = true;
+    const teamCount = ds.draft.settings.teams ?? b.league.teams;
+    const mine = gradeDraft(b.board, ds.picks, teamCount).find((g) => g.slot === slot);
+    if (!mine) return;
+    const byId = new Map(b.board.map((p) => [p.sleeperId, p]));
+    let best: { name: string; label: string; d: number } | null = null;
+    let reach: { name: string; label: string; d: number } | null = null;
+    for (const pick of ds.picks.filter((p) => p.draft_slot === slot)) {
+      const row = byId.get(pick.player_id);
+      if (!row || row.adp == null) continue;
+      const d = pick.pick_no - row.adp;
+      const entry = { name: row.name, label: pickLabel(pick.pick_no, teamCount), d };
+      if (!best || d > best.d) best = entry;
+      if (!reach || d < reach.d) reach = entry;
+    }
+    authFetch("/api/history", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        leagueId: leagueId ?? `draft:${draftId}`,
+        kind: "draft_recap",
+        payload: {
+          draftId,
+          season: b.league.season,
+          grade: mine.grade,
+          totalVbd: mine.totalVbd,
+          steal: mine.steal,
+          bestPick: best ? { name: best.name, label: best.label } : undefined,
+          biggestReach: reach ? { name: reach.name, label: reach.label } : undefined,
+        },
+      }),
+    }).catch(() => {});
+  }, [board.data, draftState.data, myUserId, leagueId, draftId]);
 
   if (board.isLoading) {
     return (
@@ -733,6 +779,7 @@ export function DraftRoom({ leagueId, draftId: mockDraftId }: { leagueId?: strin
             {navSegment}
             {teamControl}
             <GlossaryButton />
+            <AccountButton leagueId={leagueId} />
           </div>
         </header>
       ) : (
@@ -753,6 +800,7 @@ export function DraftRoom({ leagueId, draftId: mockDraftId }: { leagueId?: strin
           {navSegment}
           {teamControl}
           <GlossaryButton />
+          <AccountButton leagueId={leagueId} />
         </header>
       )}
 

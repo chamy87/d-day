@@ -9,6 +9,7 @@ import { Tag } from "@/components/ui/tag";
 import { PositionBadge, toPosition } from "@/components/ui/position-badge";
 import { Wordmark } from "@/components/wordmark";
 import { Turnstile } from "@/components/turnstile";
+import { AccountButton, RecentLeagues } from "@/components/account";
 import type { LeagueSummary } from "@/app/api/league/[id]/route";
 
 const STATUS_TAG: Record<string, { tone: "accent" | "value" | "neutral"; label: string }> = {
@@ -96,17 +97,22 @@ export function Landing({ turnstileSiteKey }: { turnstileSiteKey: string | null 
   const status = league ? (STATUS_TAG[league.status] ?? STATUS_TAG.pre_draft) : null;
 
   return (
-    <div
-      style={{
-        minHeight: "100dvh",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "48px 24px",
-        gap: 32,
-      }}
-    >
+    <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
+      <header style={{ display: "flex", alignItems: "center", padding: "12px 16px" }}>
+        <span style={{ flex: 1 }} />
+        <AccountButton />
+      </header>
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "12px 24px 48px",
+          gap: 28,
+        }}
+      >
       <div style={{ textAlign: "center" }}>
         <Wordmark size={72} />
         <div
@@ -122,8 +128,8 @@ export function Landing({ turnstileSiteKey }: { turnstileSiteKey: string | null 
           Fantasy football draft assistant
         </div>
         <div style={{ fontSize: 15, color: "var(--text-muted)", marginTop: 14, maxWidth: 440 }}>
-          Paste your Sleeper league ID — or a mock draft ID to test drive. No login, no setup —
-          rankings tuned to your league&apos;s exact scoring and roster.
+          Paste your Sleeper league ID (or a mock draft ID) — or pick up where you left off.
+          No login required — rankings tuned to your league&apos;s exact scoring and roster.
         </div>
       </div>
 
@@ -226,7 +232,9 @@ export function Landing({ turnstileSiteKey }: { turnstileSiteKey: string | null 
         </Card>
       )}
 
-      <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: "auto" }}>
+      <RecentLeagues />
+      </div>
+      <div style={{ textAlign: "center", fontSize: 11, color: "var(--text-faint)", padding: "0 0 14px" }}>
         Data: Sleeper · nflverse · FantasyFootballCalculator · FantasyCalc · Boris Chen
       </div>
     </div>

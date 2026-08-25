@@ -1,0 +1,138 @@
+<!-- @dsCard group="Proposals" viewport="1280x820" name="Accounts & History v1" subtitle="UX proposal: recent leagues, optional sign-in, trade history" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>D-Day — Accounts & History proposal</title>
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>html,body,#root{height:100%;margin:0}</style></head><body><div id="root"></div>
+<script type="text/babel">
+const {Card,Tag,Button,Input,PositionBadge,StatDelta,IconButton,Tabs}=window.DDayFantasyDesignSystem_0ed541;
+const LEAGUES=[
+ {id:'9920…5744',name:'The Gridiron Gentlemen',season:'2026',tags:['12 teams','Half PPR','Superflex'],status:'IN SEASON',tone:'value',team:'BigDawgs'},
+ {id:'8817…0021',name:'Office Punishment League',season:'2026',tags:['10 teams','PPR'],status:'DRAFTING',tone:'accent',team:null},
+ {id:'7734…9910',name:'Dynasty Degens',season:'2025',tags:['12 teams','TE premium'],status:'COMPLETE',tone:'neutral',team:'Couch GMs'},
+];
+const TRADES=[
+ {date:'Aug 22',sends:[['RB','Josh Jacobs']],recv:[['WR','Drake London'],['TE','Trey McBride']],delta:640,verdict:'ACCEPT',tone:'value'},
+ {date:'Aug 19',sends:[['WR','DK Metcalf'],['RB','James Cook']],recv:[['RB','Bijan Robinson']],delta:-380,verdict:'DECLINE',tone:'reach'},
+ {date:'Aug 15',sends:[['QB','Joe Burrow']],recv:[['QB','Jayden Daniels']],delta:120,verdict:'FAIR',tone:'neutral'},
+];
+const initials=n=>n.split(' ').map(w=>w[0]).filter(Boolean).slice(0,2).join('').toUpperCase();
+function AvatarButton({authed,onClick}){
+  return <button onClick={onClick} title={authed?'Account':'Sign in'} style={{display:'flex',alignItems:'center',gap:6,background:'transparent',border:'1px solid var(--line-2)',borderRadius:'var(--radius-pill)',padding:authed?'3px 12px 3px 4px':'3px 12px',cursor:'pointer',color:'var(--text-muted)',fontSize:11,fontFamily:'var(--font-body)'}}>
+    {authed&&<span style={{width:20,height:20,borderRadius:'50%',background:'var(--accent-dim)',border:'1px solid rgba(255,180,61,.4)',display:'inline-flex',alignItems:'center',justifyContent:'center',fontFamily:'var(--font-mono)',fontSize:8,fontWeight:700,color:'var(--accent)'}}>RC</span>}
+    {authed?'riley@…com':'Sign in'}
+  </button>;
+}
+function SignInSheet({onClose,onAuth}){
+  const [sent,setSent]=React.useState(false);
+  return <div style={{position:'fixed',inset:0,background:'rgba(11,14,17,.8)',backdropFilter:'blur(3px)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:100,padding:24}} onClick={onClose}>
+    <div onClick={e=>e.stopPropagation()}><Card title="Sync across devices" style={{width:400,maxWidth:'100%'}} action={<IconButton label="Close" size="sm" onClick={onClose}><span style={{fontSize:12}}>✕</span></IconButton>}>
+      <div style={{fontSize:13,color:'var(--text-muted)',marginBottom:16}}>Keep your leagues, queues and trade history on every device. <strong style={{color:'var(--text-body)'}}>Everything works without an account</strong> — this just makes it portable.</div>
+      {sent?<div style={{fontSize:13,padding:'14px 0'}}><Tag tone="value">SENT</Tag><span style={{marginLeft:8,color:'var(--text-muted)'}}>Check your inbox for the magic link.</span></div>:
+      <div style={{display:'flex',flexDirection:'column',gap:10}}>
+        <div style={{display:'flex',gap:8,alignItems:'flex-end'}}>
+          <Input label="Email" placeholder="you@example.com" style={{flex:1}}/>
+          <Button variant="primary" onClick={()=>setSent(true)}>Send link</Button>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:10,color:'var(--text-faint)',fontSize:11}}><span style={{flex:1,height:1,background:'var(--line-1)'}}></span>or<span style={{flex:1,height:1,background:'var(--line-1)'}}></span></div>
+        <Button variant="secondary" onClick={onAuth}>Continue with Google</Button>
+        <div style={{fontSize:11,color:'var(--text-faint)'}}>No passwords. Your current session merges into the account automatically.</div>
+      </div>}
+    </Card></div>
+  </div>;
+}
+function RecentLeagues({onOpenHistory}){
+  const [gone,setGone]=React.useState([]);
+  return <Card title="Recent leagues" pad={false} style={{width:'100%',maxWidth:480}} action={<Button variant="ghost" size="sm" onClick={onOpenHistory}>History</Button>}>
+    {LEAGUES.filter(l=>!gone.includes(l.id)).map(l=>
+      <div key={l.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',borderBottom:'1px solid var(--line-1)',cursor:'pointer',transition:'background var(--dur-fast)'}}
+        onMouseEnter={e=>e.currentTarget.style.background='var(--bg-1)'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            <span style={{fontWeight:700,fontSize:14,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l.name}</span>
+            <Tag tone={l.tone}>{l.status}</Tag>
+          </div>
+          <div style={{display:'flex',gap:6,alignItems:'center',marginTop:4,fontSize:11,color:'var(--text-faint)'}}>
+            <span style={{fontFamily:'var(--font-mono)'}}>{l.season}</span>·{l.tags.join(' · ')}
+            {l.team&&<span style={{display:'inline-flex',alignItems:'center',gap:4,marginLeft:4}}><span style={{width:16,height:16,borderRadius:'50%',background:'var(--bg-3)',display:'inline-flex',alignItems:'center',justifyContent:'center',fontFamily:'var(--font-mono)',fontSize:7,fontWeight:700}}>{initials(l.team)}</span>{l.team}</span>}
+          </div>
+        </div>
+        <span style={{fontFamily:'var(--font-mono)',fontSize:12,color:'var(--text-muted)'}}>→</span>
+        <IconButton label="Forget league" size="sm" onClick={e=>{e.stopPropagation();setGone(g=>[...g,l.id])}}><span style={{fontSize:12}}>✕</span></IconButton>
+      </div>)}
+  </Card>;
+}
+function HistoryDrawer({onClose}){
+  const [tab,setTab]=React.useState('TRADES');
+  return <div style={{position:'fixed',inset:0,background:'rgba(11,14,17,.6)',zIndex:90,display:'flex',justifyContent:'flex-end'}} onClick={onClose}>
+    <div onClick={e=>e.stopPropagation()} style={{width:440,maxWidth:'100%',height:'100%',background:'var(--surface-panel)',borderLeft:'1px solid var(--line-1)',display:'flex',flexDirection:'column'}}>
+      <div style={{display:'flex',alignItems:'center',gap:12,padding:'14px 16px',borderBottom:'1px solid var(--line-1)'}}>
+        <span style={{fontFamily:'var(--font-display)',fontStretch:'125%',fontWeight:850,fontSize:16}}>HISTORY</span>
+        <span style={{fontSize:11,color:'var(--text-faint)'}}>The Gridiron Gentlemen</span>
+        <span style={{flex:1}}></span>
+        <Tabs size="sm" items={['TRADES','DRAFT']} value={tab} onChange={setTab}/>
+        <IconButton label="Close" size="sm" onClick={onClose}><span style={{fontSize:12}}>✕</span></IconButton>
+      </div>
+      <div style={{overflowY:'auto',flex:1,padding:14,display:'flex',flexDirection:'column',gap:12}}>
+        {tab==='TRADES'?TRADES.map((t,i)=>
+          <Card key={i} pad={false}>
+            <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',borderBottom:'1px solid var(--line-1)'}}>
+              <span style={{fontFamily:'var(--font-mono)',fontSize:10,color:'var(--text-faint)'}}>{t.date}</span>
+              <span style={{flex:1}}></span>
+              <StatDelta value={t.delta} suffix=" val"/>
+              <Tag tone={t.tone}>{t.verdict}</Tag>
+            </div>
+            <div style={{display:'flex',gap:0,padding:'10px 12px'}}>
+              <div style={{flex:1}}>
+                <div style={{fontFamily:'var(--font-mono)',fontSize:9,letterSpacing:'.08em',color:'var(--text-faint)',marginBottom:6}}>YOU SEND</div>
+                {t.sends.map(([p,n])=><div key={n} style={{display:'flex',alignItems:'center',gap:6,fontSize:12,marginBottom:4}}><PositionBadge pos={p} size="sm"/>{n}</div>)}
+              </div>
+              <div style={{alignSelf:'center',color:'var(--text-faint)',padding:'0 10px',fontFamily:'var(--font-mono)'}}>⇄</div>
+              <div style={{flex:1}}>
+                <div style={{fontFamily:'var(--font-mono)',fontSize:9,letterSpacing:'.08em',color:'var(--text-faint)',marginBottom:6}}>YOU RECEIVE</div>
+                {t.recv.map(([p,n])=><div key={n} style={{display:'flex',alignItems:'center',gap:6,fontSize:12,marginBottom:4}}><PositionBadge pos={p} size="sm"/>{n}</div>)}
+              </div>
+            </div>
+          </Card>):
+          <Card title="Draft recap · 2026">
+            <div style={{display:'flex',gap:24,flexWrap:'wrap'}}>
+              {[['VALUE VS ADP','+186'],['BEST PICK','J. Daniels 3.07'],['BIGGEST REACH','T. McBride 5.02']].map(([l,v])=><div key={l}><div style={{fontFamily:'var(--font-mono)',fontSize:9,letterSpacing:'.08em',color:'var(--text-faint)'}}>{l}</div><div style={{fontFamily:'var(--font-mono)',fontSize:14,fontWeight:600,marginTop:2}}>{v}</div></div>)}
+            </div>
+            <div style={{fontSize:12,color:'var(--text-muted)',marginTop:12}}>Snapshotted when the draft completed. Full pick-by-pick grades live on the dashboard.</div>
+          </Card>}
+      </div>
+      <div style={{padding:'10px 16px',borderTop:'1px solid var(--line-1)',fontSize:11,color:'var(--text-faint)'}}>History is saved to your account and survives browser changes.</div>
+    </div>
+  </div>;
+}
+function App(){
+  const [authed,setAuthed]=React.useState(false);
+  const [sheet,setSheet]=React.useState(false);
+  const [history,setHistory]=React.useState(false);
+  return <div style={{minHeight:'100%',display:'flex',flexDirection:'column'}}>
+    <header style={{display:'flex',alignItems:'center',padding:'12px 16px'}}>
+      <span style={{flex:1}}></span>
+      <AvatarButton authed={authed} onClick={()=>authed?setHistory(true):setSheet(true)}/>
+    </header>
+    <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'12px 24px 48px',gap:26}}>
+      <div style={{textAlign:'center'}}>
+        <span style={{fontFamily:'var(--font-display)',fontStretch:'125%',fontWeight:850,fontSize:56,letterSpacing:'-.02em'}}><span style={{color:'var(--accent)'}}>D-</span>DAY</span>
+        <div style={{fontSize:13,fontWeight:700,letterSpacing:'.14em',textTransform:'uppercase',color:'var(--text-faint)',marginTop:6}}>Fantasy football draft assistant</div>
+        <div style={{fontSize:15,color:'var(--text-muted)',marginTop:12,maxWidth:440}}>Paste your Sleeper league ID — or pick up where you left off. No login required.</div>
+      </div>
+      <div style={{display:'flex',gap:10,alignItems:'flex-end',width:'100%',maxWidth:480,flexWrap:'wrap'}}>
+        <Input label="Sleeper league ID" mono size="lg" placeholder="992093874321055744" style={{flex:1,minWidth:220}}/>
+        <Button variant="primary" size="lg">Find league</Button>
+      </div>
+      <RecentLeagues onOpenHistory={()=>setHistory(true)}/>
+      {!authed&&<div style={{fontSize:12,color:'var(--text-faint)'}}>These leagues live in this browser. <a href="#" onClick={e=>{e.preventDefault();setSheet(true)}} style={{color:'var(--accent)'}}>Sign in</a> to keep them everywhere.</a></div>}
+    </div>
+    <div style={{textAlign:'center',fontSize:11,color:'var(--text-faint)',padding:'0 0 14px'}}>Data: Sleeper · nflverse · FantasyFootballCalculator · FantasyCalc · Boris Chen</div>
+    {sheet&&<SignInSheet onClose={()=>setSheet(false)} onAuth={()=>{setAuthed(true);setSheet(false)}}/>}
+    {history&&<HistoryDrawer onClose={()=>setHistory(false)}/>}
+  </div>;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script></body></html>

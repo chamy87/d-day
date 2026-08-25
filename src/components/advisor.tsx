@@ -1,7 +1,9 @@
 "use client";
 
 import React from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { authFetch } from "@/lib/auth-client";
+import type { HistoryItem } from "@/app/api/history/route";
 import { Card } from "@/components/ui/card";
 import { Tag } from "@/components/ui/tag";
 import { Button } from "@/components/ui/button";
@@ -72,6 +74,8 @@ export function AdvisorTab({
     }));
   };
 
+  const queryClient = useQueryClient();
+  const [viewedPast, setViewedPast] = React.useState<TradeEvaluation | null>(null);
   const evaluate = useMutation({
     mutationFn: async () => {
       const res = await fetch(`/api/league/${leagueId}/trade`, {
@@ -85,6 +89,31 @@ export function AdvisorTab({
       if (!res.ok) throw new Error(d.error ?? "Evaluation failed.");
       return d as TradeEvaluation;
     },
+    onSuccess: (result) => {
+      setViewedPast(null);
+      // Durable history, fire-and-forget (proposals/ACCOUNTS-HISTORY.md item 4).
+      authFetch("/api/history", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          leagueId,
+          kind: "trade_eval",
+          payload: { ...result, myRosterId },
+        }),
+      })
+        .then(() => queryClient.invalidateQueries({ queryKey: ["tradeHistory", leagueId] }))
+        .catch(() => {});
+    },
+  });
+
+  const pastEvals = useQuery({
+    queryKey: ["tradeHistory", leagueId],
+    queryFn: async () => {
+      const res = await authFetch(`/api/history?league=${encodeURIComponent(leagueId)}&kind=trade_eval&limit=8`);
+      const d = (await res.json()) as { items?: HistoryItem[] };
+      return d.items ?? [];
+    },
+    staleTime: 60 * 1000,
   });
 
   const totalSent = involved.reduce((n, r) => n + (sends[r]?.length ?? 0), 0);
@@ -325,15 +354,18 @@ export function AdvisorTab({
             </span>
           )}
 
-          {evaluate.data && (
+          {(viewedPast ?? evaluate.data) && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 13 }}>
+              {viewedPast && (
+                <div style={{ fontSize: 11, color: "var(--text-faint)" }}>Past evaluation (read-only)</div>
+              )}
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                <Tag tone={evaluate.data.realistic ? "value" : "reach"}>
-                  {evaluate.data.realistic ? "REALISTIC" : "UNREALISTIC"}
+                <Tag tone={(viewedPast ?? evaluate.data)!.realistic ? "value" : "reach"}>
+                  {(viewedPast ?? evaluate.data)!.realistic ? "REALISTIC" : "UNREALISTIC"}
                 </Tag>
-                <Tag tone="neutral">{evaluate.data.fairness}</Tag>
+                <Tag tone="neutral">{(viewedPast ?? evaluate.data)!.fairness}</Tag>
               </div>
-              {evaluate.data.teams.map((t) => (
+              {(viewedPast ?? evaluate.data)!.teams.map((t) => (
                 <div key={t.rosterId} style={{ borderTop: "1px solid var(--line-1)", paddingTop: 8 }}>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     <b>{t.teamName}</b>
@@ -347,9 +379,55 @@ export function AdvisorTab({
                 </div>
               ))}
               <div style={{ borderTop: "1px solid var(--line-1)", paddingTop: 8, color: "var(--text-muted)" }}>
-                <Tag tone="accent">ANGLE</Tag> {evaluate.data.angle}
+                <Tag tone="accent">ANGLE</Tag> {(viewedPast ?? evaluate.data)!.angle}
               </div>
-              <div style={{ color: "var(--text-body)" }}>{evaluate.data.summary}</div>
+              <div style={{ color: "var(--text-body)" }}>{(viewedPast ?? evaluate.data)!.summary}</div>
+            </div>
+          )}
+
+          {(pastEvals.data?.length ?? 0) > 0 && (
+            <div style={{ borderTop: "1px solid var(--line-1)", paddingTop: 10 }}>
+              <div
+                style={{
+                  fontSize: "var(--text-xs)",
+                  fontWeight: 700,
+                  letterSpacing: "var(--track-caps)",
+                  textTransform: "uppercase",
+                  color: "var(--text-faint)",
+                  marginBottom: 8,
+                }}
+              >
+                Past evaluations
+              </div>
+              {pastEvals.data!.map((h) => {
+                const p = h.payload as unknown as TradeEvaluation & { myRosterId?: number };
+                const mine = p.teams?.find((t) => t.rosterId === p.myRosterId) ?? p.teams?.[0];
+                if (!mine) return null;
+                return (
+                  <div
+                    key={h.id}
+                    onClick={() => setViewedPast(p)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "7px 4px",
+                      borderBottom: "1px solid var(--line-1)",
+                      cursor: "pointer",
+                      fontSize: 12,
+                    }}
+                  >
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-faint)", flexShrink: 0 }}>
+                      {new Date(h.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                    </span>
+                    <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-muted)" }}>
+                      {mine.gives.join(", ") || "—"} ⇄ {mine.receives.join(", ") || "—"}
+                    </span>
+                    <StatDelta value={mine.valueDelta} style={{ flexShrink: 0 }} />
+                    <Tag tone={p.realistic ? "value" : "reach"}>{p.realistic ? "REALISTIC" : "UNREALISTIC"}</Tag>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

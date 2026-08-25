@@ -5,8 +5,11 @@ let browserClient: SupabaseClient | undefined;
 
 /** Publishable-key client for client components and public reads (RLS enforced). */
 export function supabaseBrowser(): SupabaseClient {
+  // Auth is optional: session persistence turns on only after first sign-in
+  // (dday:authed flag) so anonymous users skip the auth roundtrip entirely.
+  const authed = typeof window !== "undefined" && localStorage.getItem("dday:authed") === "1";
   browserClient ??= createClient(env.supabaseUrl(), env.supabasePublishableKey(), {
-    auth: { persistSession: false }, // no-login product
+    auth: { persistSession: authed },
   });
   return browserClient;
 }

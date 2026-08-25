@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { sleeper } from "@/lib/sleeper";
+import { getCaller, callerKey, withSidCookie } from "@/lib/identity";
 
 export const dynamic = "force-dynamic";
 
@@ -87,14 +89,35 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     draftId: league.draft_id,
   };
 
-  // Best-effort cache; the lookup must work even if the schema isn't applied yet.
+  // Best-effort cache + recent-leagues recording; the lookup must work even
+  // if any of this fails.
+  const caller = await getCaller(req).catch(() => null);
   try {
-    await supabaseAdmin()
-      .from("leagues_cache")
-      .upsert({ league_id: league.league_id, settings: league, fetched_at: new Date().toISOString() });
+    const db = supabaseAdmin();
+    const users = await sleeper.leagueUsers(league.league_id).catch(() => null);
+    await db.from("leagues_cache").upsert({
+      league_id: league.league_id,
+      settings: league,
+      ...(users ? { users } : {}),
+      fetched_at: new Date().toISOString(),
+    });
+    if (caller) {
+      const key = callerKey(caller);
+      await db.from("user_leagues").upsert(
+        {
+          [key.column]: key.value,
+          league_id: league.league_id,
+          league_name: league.name,
+          season: league.season,
+          last_seen: new Date().toISOString(),
+        },
+        { onConflict: `${key.column},league_id` },
+      );
+    }
   } catch {
-    // degraded silently — cache only
+    // degraded silently — cache/recents only
   }
 
-  return NextResponse.json(summary);
+  const response = NextResponse.json(summary);
+  return caller ? withSidCookie(response, caller.sid) : response;
 }
