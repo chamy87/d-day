@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -17,6 +18,7 @@ const STATUS_TAG: Record<string, { tone: "accent" | "value" | "neutral"; label: 
 };
 
 export function Landing() {
+  const router = useRouter();
   const [id, setId] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -125,8 +127,13 @@ export function Landing() {
             ))}
           </div>
           <div style={{ marginTop: 16 }}>
-            <Button variant="primary" style={{ width: "100%" }} disabled>
-              Draft room — next up
+            <Button
+              variant="primary"
+              style={{ width: "100%" }}
+              disabled={!league.draftId}
+              onClick={() => router.push(`/league/${league.leagueId}/draft`)}
+            >
+              {league.draftId ? "Enter draft room →" : "No draft attached to this league"}
             </Button>
           </div>
         </Card>
