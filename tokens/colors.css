@@ -1,0 +1,22 @@
+:root{
+/* Surfaces (dark-only system) */
+--bg-0:#0B0E11; --bg-1:#12161B; --bg-2:#1A2027; --bg-3:#232B34;
+--line-1:#2A333D; --line-2:#3A4550;
+/* Foreground */
+--fg-1:#F2F5F7; --fg-2:#A8B3BD; --fg-3:#66727D;
+/* Brand accent — "on the clock" amber */
+--accent:#FFB43D; --accent-hover:#FFC468; --accent-press:#E89A1F; --accent-ink:#1A1204; --accent-dim:rgba(255,180,61,.14);
+/* Semantic */
+--value:#3DDC97; --value-dim:rgba(61,220,151,.14);
+--reach:#FF5C5C; --reach-dim:rgba(255,92,92,.14);
+--warn:#FFD23D;
+/* Position badges */
+--pos-qb:#F86A5C; --pos-rb:#46C2A0; --pos-wr:#58A7FF; --pos-te:#FF8A65; --pos-k:#B39DDB; --pos-def:#8D9AA5; --pos-flex:#D7B45C;
+/* Tier scale (T1 hottest → T6 coldest) */
+--tier-1:#FFB43D; --tier-2:#FF8A65; --tier-3:#58A7FF; --tier-4:#46C2A0; --tier-5:#B39DDB; --tier-6:#66727D;
+/* Semantic aliases */
+--surface-page:var(--bg-0); --surface-panel:var(--bg-1); --surface-card:var(--bg-2); --surface-raised:var(--bg-3);
+--text-body:var(--fg-1); --text-muted:var(--fg-2); --text-faint:var(--fg-3);
+--border-card:var(--line-1); --border-strong:var(--line-2);
+--focus-ring:0 0 0 2px var(--bg-0),0 0 0 4px var(--accent);
+}

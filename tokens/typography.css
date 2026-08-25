@@ -1,0 +1,14 @@
+:root{
+--font-display:'Archivo',sans-serif; /* use with --stretch-display */
+--font-body:'Archivo',sans-serif;
+--font-mono:'JetBrains Mono',monospace; /* stats, timers, pick numbers */
+--stretch-display:125%; --stretch-body:100%;
+--text-hero:clamp(40px,6vw,72px); --text-h1:32px; --text-h2:24px; --text-h3:18px;
+--text-body-size:15px; --text-sm:13px; --text-xs:11px;
+--weight-black:850; --weight-bold:700; --weight-semibold:600; --weight-regular:440;
+--leading-tight:1.05; --leading-snug:1.25; --leading-body:1.5;
+--track-caps:.08em; /* uppercase labels */
+}
+body{font-family:var(--font-body);font-weight:var(--weight-regular);color:var(--text-body);background:var(--surface-page);font-size:var(--text-body-size);line-height:var(--leading-body);-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}
+a:hover{color:var(--accent-hover);text-decoration:underline}

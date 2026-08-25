@@ -1,0 +1,38 @@
+<!-- @dsCard group="Components" viewport="700x400" name="Display" subtitle="Card, PlayerRow, PositionBadge, TierBreak, StatDelta, Tag" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body{margin:0;padding:16px}</style></head><body><div id="root"></div>
+<script type="text/babel">
+const {Card,PlayerRow,PositionBadge,TierBreak,StatDelta,Tag}=window.DDayFantasyDesignSystem_0ed541;
+function Demo(){
+  return <div style={{display:'grid',gridTemplateColumns:'1fr 240px',gap:14,alignItems:'start'}}>
+    <Card title="Best available" pad={false} action={<Tag tone="accent">VBD · PPR</Tag>}>
+      <TierBreak tier={1} note="2 left"/>
+      <PlayerRow rank={7} name="Bijan Robinson" pos="RB" team="ATL" bye={5} vbd={62} adpDelta={3} onClick={()=>{}}/>
+      <PlayerRow rank={8} name="CeeDee Lamb" pos="WR" team="DAL" bye={7} vbd={58} adpDelta={-2} onClick={()=>{}}/>
+      <TierBreak tier={2} note="5 left"/>
+      <PlayerRow rank={9} name="Drake London" pos="WR" team="ATL" bye={5} vbd={44} adpDelta={11} injury="Q" onClick={()=>{}}/>
+      <PlayerRow rank={10} name="Josh Jacobs" pos="RB" team="GB" bye={10} vbd={41} drafted/>
+    </Card>
+    <div style={{display:'flex',flexDirection:'column',gap:12}}>
+      <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+        <PositionBadge pos="QB"/><PositionBadge pos="RB"/><PositionBadge pos="WR"/><PositionBadge pos="TE"/><PositionBadge pos="K"/><PositionBadge pos="DEF"/><PositionBadge pos="FLEX"/>
+      </div>
+      <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+        <Tag tone="value">VALUE +18</Tag><Tag tone="reach">OUT</Tag><Tag tone="warn">BYE 7</Tag><Tag tone="neutral">FAAB $12</Tag>
+      </div>
+      <div style={{display:'flex',gap:12}}>
+        <StatDelta value={14} label="vs ADP"/><StatDelta value={-6} label="proj"/>
+      </div>
+      <Card title="On the clock" glow>
+        <div style={{fontFamily:'var(--font-mono)',fontSize:24,fontWeight:700,color:'var(--accent)'}}>1:24</div>
+        <div style={{fontSize:'var(--text-xs)',color:'var(--text-faint)'}}>Pick 3.07 · you're up in 2</div>
+      </Card>
+    </div>
+  </div>;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Demo/>);
+</script></body></html>
