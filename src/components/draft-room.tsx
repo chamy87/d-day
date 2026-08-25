@@ -33,6 +33,7 @@ import {
 import { useIsMobile } from "@/lib/use-mobile";
 import { loadTeamPref, saveTeamPref, loadQueuePref, saveQueuePref } from "@/lib/session-client";
 import { teamInitials } from "@/components/team-picker-modal";
+import { GlossaryButton } from "@/components/glossary";
 
 const POS_TABS = ["ALL", "QB", "RB", "WR", "TE", "K", "DEF"];
 const MOBILE_PANES = ["BOARD", "QUEUE", "ROSTER", "PICKS"] as const;
@@ -148,19 +149,19 @@ function ExpandedDetail({ p, queued, onQueue }: { p: Ranked; queued: boolean; on
       getJson<{ items: { title: string; source: string }[] }>(`/api/player/${p.sleeperId}/news`),
     staleTime: 10 * 60 * 1000,
   });
-  const cells: [string, string][] = [
-    ["PROJ", `${p.points} pts`],
-    ["VBD", `${p.vbd > 0 ? "+" : ""}${p.vbd}`],
-    ["ADP", p.adp != null ? String(Math.round(p.adp)) : "—"],
-    ["FC VALUE", p.fc != null ? p.fc.toLocaleString() : "—"],
-    ["TIER", String(p.tier)],
-    ["BYE", p.bye != null ? String(p.bye) : "—"],
+  const cells: [string, string, string][] = [
+    ["PROJ", `${p.points} pts`, "Projected season points under your league's exact scoring."],
+    ["VBD", `${p.vbd > 0 ? "+" : ""}${p.vbd}`, "Points above a replacement-level starter at this position — the board ranks by this."],
+    ["ADP", p.adp != null ? String(Math.round(p.adp)) : "—", "Average Draft Position — where the market takes this player."],
+    ["FC VALUE", p.fc != null ? p.fc.toLocaleString() : "—", "FantasyCalc trade-market value for your league shape."],
+    ["TIER", String(p.tier), "Boris Chen tier — players inside a tier are interchangeable."],
+    ["BYE", p.bye != null ? String(p.bye) : "—", "Week this player's team doesn't play."],
   ];
   return (
     <div style={{ padding: "10px 12px 14px 46px", borderBottom: "1px solid var(--line-1)", background: "var(--bg-1)" }}>
       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "center" }}>
-        {cells.map(([l, v]) => (
-          <div key={l}>
+        {cells.map(([l, v, help]) => (
+          <div key={l} title={help} style={{ cursor: "help" }}>
             <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: ".08em", color: "var(--text-faint)" }}>{l}</div>
             <div style={{ fontFamily: "var(--font-mono)", fontSize: 15, fontWeight: 600 }}>{v}</div>
           </div>
@@ -590,7 +591,14 @@ export function DraftRoom({ leagueId, draftId: mockDraftId }: { leagueId?: strin
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <PositionBadge pos={s.player.pos as Position} />
             <span style={{ fontWeight: 700, fontSize: i === 0 ? 16 : 14, flex: 1 }}>{s.player.name}</span>
-            {s.player.adpDelta != null && s.player.adpDelta >= 5 && <Tag tone="value">VALUE +{s.player.adpDelta}</Tag>}
+            {s.player.adpDelta != null && s.player.adpDelta >= 5 && (
+              <span
+                title={`Market discount: available ~${s.player.adpDelta} picks later than ADP. Not extra points — VBD is the points number.`}
+                style={{ cursor: "help" }}
+              >
+                <Tag tone="value">VALUE +{s.player.adpDelta}</Tag>
+              </span>
+            )}
             <IconButton
               label={queue.includes(s.player.sleeperId) ? "In queue" : "Add to queue"}
               size="sm"
@@ -724,6 +732,7 @@ export function DraftRoom({ leagueId, draftId: mockDraftId }: { leagueId?: strin
             {onClockPill}
             {navSegment}
             {teamControl}
+            <GlossaryButton />
           </div>
         </header>
       ) : (
@@ -743,6 +752,7 @@ export function DraftRoom({ leagueId, draftId: mockDraftId }: { leagueId?: strin
           {onClockPill}
           {navSegment}
           {teamControl}
+          <GlossaryButton />
         </header>
       )}
 

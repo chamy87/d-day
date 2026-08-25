@@ -16,6 +16,7 @@ import { useIsMobile } from "@/lib/use-mobile";
 import { loadTeamPref, saveTeamPref } from "@/lib/session-client";
 import { AdvisorTab } from "@/components/advisor";
 import { TeamPickerModal, TeamChip } from "@/components/team-picker-modal";
+import { GlossaryButton } from "@/components/glossary";
 import { useRouter } from "next/navigation";
 import type { DashboardResponse, DashboardPlayer } from "@/app/api/league/[id]/dashboard/route";
 import type { Insight } from "@/app/api/league/[id]/insights/route";
@@ -246,6 +247,7 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
             Pick team
           </button>
         )}
+        <GlossaryButton />
       </header>
 
       {(pickerOpen || (prefsLoaded && !myUserId && !pickerDismissed && data.users.length > 0)) && (

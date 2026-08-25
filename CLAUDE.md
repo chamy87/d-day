@@ -11,6 +11,9 @@ This project is **standalone** and must stay separate from every other project t
 - Supabase access for this project: use the connection details from `.env.local` (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_KEY` publishable, `NEXT_SECRET_SUPABASE_KEY` secret, `SUPABASE_DB_API_URL`), not the connected Supabase MCP, until the user connects an MCP scoped to the new d-day project. The project uses Supabase's new publishable/secret API keys — do not reintroduce legacy anon/service-role JWT keys.
 - GitHub and Vercel operations for this repo authenticate with `GITHUB_TOKEN` / `VERCEL_TOKEN` from `.env.local` — not with any other stored credentials (`gh` keyring auth, other Vercel logins). The Vercel account hosts both "d-day" and "Scarlettox" as separate projects; only ever touch **d-day**.
 
+## Deployments
+Deploy by **git push only** — the Vercel GitHub integration auto-deploys every push to main. NEVER run `vercel deploy` / `deploy_to_vercel` for routine releases: it produces a duplicate deployment alongside the git one and doubles compute usage. To verify a release, poll `vercel ls` (read-only) until the newest deployment is READY.
+
 ## Stack
 Next.js App Router + TypeScript · Tailwind v4 · @supabase/supabase-js · @tanstack/react-query · Recharts. Product spec: `guidelines/architecture.md`. Design system: `readme.md`, `tokens/`, `components/` (reference JSX — excluded from tsconfig/eslint; re-implement in `src/` when building real UI).
 
