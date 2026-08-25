@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { sleeper } from "@/lib/sleeper";
-import { ensurePlayers, ensureProjections, ensureAdp } from "@/lib/ingest";
+import { ensurePlayers, ensureProjections, ensureAdp, ensureTiers, ensureValues } from "@/lib/ingest";
 import { env } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +31,22 @@ export async function GET(req: Request) {
       summary[`adp:${format}`] = (await ensureAdp(db, format, 12, season, true)) ? "refreshed" : "fresh";
     } catch (e) {
       summary[`adp:${format}`] = `error: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+  for (const scoring of ["ppr", "half", "std"] as const) {
+    try {
+      summary[`tiers:${scoring}`] = (await ensureTiers(db, scoring, true)) ? "refreshed" : "fresh";
+    } catch (e) {
+      summary[`tiers:${scoring}`] = `error: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+  for (const [numQbs, ppr] of [[1, 1], [1, 0.5], [1, 0], [2, 1], [2, 0.5], [2, 0]] as const) {
+    try {
+      summary[`values:${numQbs}qb:${ppr}ppr`] = (await ensureValues(db, numQbs, ppr, true))
+        ? "refreshed"
+        : "fresh";
+    } catch (e) {
+      summary[`values:${numQbs}qb:${ppr}ppr`] = `error: ${e instanceof Error ? e.message : String(e)}`;
     }
   }
 

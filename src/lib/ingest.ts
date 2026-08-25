@@ -119,6 +119,80 @@ export async function ensureWeekProjections(
   return true;
 }
 
+/** Boris Chen tier scoring buckets and their S3 file suffixes. */
+const BC_SUFFIX: Record<string, string> = { std: "", ppr: "-PPR", half: "-HALF" };
+const BC_BASE = "https://s3-us-west-1.amazonaws.com/fftiers/out";
+
+/** Boris Chen tiers → tiers table (QB/K/DST are scoring-independent). */
+export async function ensureTiers(db: SupabaseClient, scoring: "std" | "ppr" | "half", force = false): Promise<boolean> {
+  const fresh = await newestUpdate(db, "tiers", { scoring });
+  if (!force && isFresh(fresh)) return false;
+
+  const files: { pos: string; file: string }[] = [
+    { pos: "QB", file: "text_QB" },
+    { pos: "K", file: "text_K" },
+    { pos: "DEF", file: "text_DST" },
+    { pos: "RB", file: `text_RB${BC_SUFFIX[scoring]}` },
+    { pos: "WR", file: `text_WR${BC_SUFFIX[scoring]}` },
+    { pos: "TE", file: `text_TE${BC_SUFFIX[scoring]}` },
+  ];
+
+  const now = new Date().toISOString();
+  const rows: Record<string, unknown>[] = [];
+  for (const { pos, file } of files) {
+    const res = await fetch(`${BC_BASE}/${file}.txt`, { next: { revalidate: 0 } });
+    if (!res.ok) throw new Error(`Boris Chen ${file} → ${res.status}`);
+    const text = await res.text();
+    let rank = 0;
+    for (const line of text.split("\n")) {
+      const m = line.match(/^Tier (\d+):\s*(.+)$/);
+      if (!m) continue;
+      const tier = Number(m[1]);
+      for (const name of m[2].split(",").map((s) => s.trim()).filter(Boolean)) {
+        rank += 1;
+        rows.push({ pos, scoring, tier, rank, player_name: name, updated_at: now });
+      }
+    }
+    // stale tail ranks from a longer previous list would linger past upsert
+    await db.from("tiers").delete().eq("pos", pos).eq("scoring", scoring).gt("rank", rank);
+  }
+  if (!rows.length) throw new Error("Boris Chen returned no tiers");
+  await chunkedUpsert(db, "tiers", rows, "pos,scoring,rank");
+  return true;
+}
+
+/** FantasyCalc redraft values → values_fc table, keyed by league shape. */
+export async function ensureValues(db: SupabaseClient, numQbs: 1 | 2, ppr: 0 | 0.5 | 1, force = false): Promise<boolean> {
+  const fresh = await newestUpdate(db, "values_fc", { num_qbs: numQbs, ppr });
+  if (!force && isFresh(fresh)) return false;
+  const res = await fetch(
+    `https://api.fantasycalc.com/values/current?isDynasty=false&numQbs=${numQbs}&numTeams=12&ppr=${ppr}`,
+    { next: { revalidate: 0 } },
+  );
+  if (!res.ok) throw new Error(`FantasyCalc → ${res.status}`);
+  const data = (await res.json()) as { player: { sleeperId: string | null }; value: number }[];
+  const now = new Date().toISOString();
+  const rows = data
+    .filter((d) => d.player?.sleeperId)
+    .map((d) => ({
+      sleeper_id: d.player.sleeperId,
+      num_qbs: numQbs,
+      ppr,
+      value: d.value,
+      updated_at: now,
+    }));
+  if (!rows.length) throw new Error("FantasyCalc returned no matched players");
+  await chunkedUpsert(db, "values_fc", rows, "sleeper_id,num_qbs,ppr");
+  return true;
+}
+
+/** Boris Chen scoring bucket for a league's rec setting. */
+export function bcScoring(rec: number | undefined): "std" | "ppr" | "half" {
+  if ((rec ?? 0) >= 1) return "ppr";
+  if ((rec ?? 0) >= 0.5) return "half";
+  return "std";
+}
+
 type FfcPlayer = {
   name: string;
   position: string;
@@ -128,7 +202,7 @@ type FfcPlayer = {
   bye: number | null;
 };
 
-function normalizeName(name: string): string {
+export function normalizeName(name: string): string {
   return name
     .toLowerCase()
     .replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/g, "")

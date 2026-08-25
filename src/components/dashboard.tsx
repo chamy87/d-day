@@ -328,6 +328,11 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
                       <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-muted)" }}>
                         +{w.adds24h.toLocaleString()} adds
                       </span>
+                      {w.value != null && (
+                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-faint)" }}>
+                          FC {w.value.toLocaleString()}
+                        </span>
+                      )}
                       <Tag tone="neutral">FAAB ${w.faab}</Tag>
                     </div>
                   }

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { sleeper, scoringLabel } from "@/lib/sleeper";
 import { scoreProjection } from "@/lib/vbd";
-import { ensurePlayers, ensureWeekProjections } from "@/lib/ingest";
+import { ensurePlayers, ensureWeekProjections, ensureValues } from "@/lib/ingest";
 import { relevantNews, type NewsItem } from "@/lib/news";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +26,7 @@ export type DashboardResponse = {
   rosters: { rosterId: number; ownerId: string | null; starters: string[]; players: string[] }[];
   matchups: { matchupId: number | null; rosterId: number; points: number }[];
   playersById: Record<string, DashboardPlayer>;
-  waivers: { id: string; adds24h: number; faab: number }[];
+  waivers: { id: string; adds24h: number; faab: number; value: number | null }[];
   news: NewsItem[];
   degraded: string[];
 };
@@ -60,6 +60,14 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     await ensureWeekProjections(db, state.season, week);
   } catch {
     degraded.push("projections");
+  }
+  const numQbs = league.roster_positions.includes("SUPER_FLEX") ? 2 : 1;
+  const rec = league.scoring_settings?.rec ?? 0;
+  const pprParam = rec >= 1 ? 1 : rec >= 0.5 ? 0.5 : 0;
+  try {
+    await ensureValues(db, numQbs as 1 | 2, pprParam as 0 | 0.5 | 1);
+  } catch {
+    degraded.push("values");
   }
 
   const [matchups, trending] = await Promise.all([
@@ -111,17 +119,37 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     };
   }
 
+  // FantasyCalc rest-of-season values for the trending set (league shape).
+  const trendingIds = trending.map((t) => t.player_id);
+  const valueById = new Map<string, number>();
+  if (trendingIds.length) {
+    const { data: vals } = await db
+      .from("values_fc")
+      .select("sleeper_id,value")
+      .eq("num_qbs", numQbs)
+      .eq("ppr", pprParam)
+      .in("sleeper_id", trendingIds);
+    for (const v of vals ?? []) valueById.set(v.sleeper_id, v.value);
+  }
+
   const waivers = trending
     .filter((t) => !rostered.has(t.player_id) && playersById[t.player_id])
     .map((t) => {
       const proj = playersById[t.player_id].proj ?? 0;
+      const value = valueById.get(t.player_id) ?? null;
       return {
         id: t.player_id,
         adds24h: t.count,
-        faab: Math.max(1, Math.min(40, Math.round(proj * 1.2))),
+        // FAAB from ROS value when FantasyCalc knows the player, else weekly proj.
+        faab: Math.max(1, Math.min(60, Math.round(value != null ? value / 60 : proj * 1.2))),
+        value,
       };
     })
-    .sort((a, b) => (playersById[b.id].proj ?? 0) - (playersById[a.id].proj ?? 0))
+    .sort(
+      (a, b) =>
+        (b.value ?? 0) - (a.value ?? 0) ||
+        (playersById[b.id].proj ?? 0) - (playersById[a.id].proj ?? 0),
+    )
     .slice(0, 12);
 
   const rosteredNames = playerRows.filter((p) => rostered.has(p.sleeper_id)).map((p) => p.name);

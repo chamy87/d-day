@@ -2,7 +2,15 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { sleeper, scoringLabel, ffcFormat, ffcTeams } from "@/lib/sleeper";
 import { computeVBD, scoreProjection, type Projected, type Ranked } from "@/lib/vbd";
-import { ensurePlayers, ensureProjections, ensureAdp, fetchAll } from "@/lib/ingest";
+import {
+  ensurePlayers,
+  ensureProjections,
+  ensureAdp,
+  ensureTiers,
+  bcScoring,
+  normalizeName,
+  fetchAll,
+} from "@/lib/ingest";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // cold path ingests the Sleeper players map
@@ -92,6 +100,12 @@ export async function GET(req: Request, ctx: { params: Promise<{ leagueId: strin
   } catch {
     degraded.push("adp");
   }
+  const tierBucket = bcScoring(league.scoring_settings?.rec);
+  try {
+    await ensureTiers(db, tierBucket);
+  } catch {
+    degraded.push("tiers");
+  }
 
   const [players, projections, adpRows] = await Promise.all([
     fetchAll<{ sleeper_id: string; name: string; team: string | null; pos: string; bye: number | null; status: string | null }>(
@@ -142,6 +156,26 @@ export async function GET(req: Request, ctx: { params: Promise<{ leagueId: strin
     rosterPositions: league.roster_positions,
     teams: league.total_rosters,
   }).slice(0, 300);
+
+  // Boris Chen tiers override the computed VBD-gap tiers where names match;
+  // tiers are then forced non-decreasing down the board so groups stay sane.
+  try {
+    const tierRows = await fetchAll<{ pos: string; tier: number; player_name: string }>((from, to) =>
+      db.from("tiers").select("pos,tier,player_name").eq("scoring", tierBucket).range(from, to),
+    );
+    if (tierRows.length) {
+      const tierByKey = new Map(tierRows.map((t) => [`${normalizeName(t.player_name)}:${t.pos}`, t.tier]));
+      for (const p of board) {
+        const bc = tierByKey.get(`${normalizeName(p.name)}:${p.pos}`);
+        if (bc != null) p.tier = bc;
+      }
+      for (let i = 1; i < board.length; i++) {
+        if (board[i].tier < board[i - 1].tier) board[i].tier = board[i - 1].tier;
+      }
+    }
+  } catch {
+    degraded.push("tiers");
+  }
 
   await db
     .from("draft_board")
