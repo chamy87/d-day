@@ -15,6 +15,10 @@ export default withSentryConfig(nextConfig, {
 
   sourcemaps: {
     deleteSourcemapsAfterUpload: true,
+    // Root-level js in the deploy output is Vercel-generated glue (our app
+    // chunks live under _next/) — no user stack frames reference it, and it
+    // has no sourcemap, which otherwise triggers a reference warning.
+    ignore: ["*.js"],
   },
 
   // Upload wider set of client source files for better stack trace resolution
