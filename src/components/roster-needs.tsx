@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatDelta } from "@/components/ui/stat-delta";
 import { PositionBadge, type Position } from "@/components/ui/position-badge";
 import type { NeedsResponse } from "@/app/api/league/[id]/needs/route";
+import type { GamePlanResponse } from "@/app/api/league/[id]/gameplan/route";
 import type { RatedPlayer } from "@/lib/roster-needs";
 import { agoShort } from "@/components/start-sit";
 
@@ -182,19 +183,60 @@ export function WaiverIdeas({ needs }: { needs: NeedsResponse }) {
   );
 }
 
+export function useGamePlan(leagueId: string, rosterId: number | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ["gameplan", leagueId, rosterId],
+    queryFn: async () => {
+      const res = await fetch(`/api/league/${leagueId}/gameplan?roster=${rosterId}`);
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? "AI game plan unavailable.");
+      return d as GamePlanResponse;
+    },
+    enabled: enabled && rosterId != null,
+    staleTime: 30 * 60 * 1000,
+    retry: false,
+  });
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [done, setDone] = React.useState(false);
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={() => {
+        navigator.clipboard?.writeText(text).then(() => {
+          setDone(true);
+          setTimeout(() => setDone(false), 1500);
+        });
+      }}
+    >
+      {done ? "Copied" : "Copy pitch"}
+    </Button>
+  );
+}
+
 export function TradeIdeas({
   needs,
   onLoad,
+  pitches,
+  pitchesLoading,
+  limit,
 }: {
   needs: NeedsResponse;
   onLoad: (partnerRosterId: number, myGives: string[], theyGive: string) => void;
+  /** AI case + pitch per target (from the game plan). */
+  pitches?: GamePlanResponse["plan"]["trades"];
+  pitchesLoading?: boolean;
+  limit?: number;
 }) {
   const P = needs.players;
   return (
     <Card title="Trade targets — both sides improve" pad={false}>
-      {needs.trades.map((t, i) => {
+      {needs.trades.slice(0, limit ?? needs.trades.length).map((t, i) => {
         const target = P[t.target];
         if (!target) return null;
+        const ai = pitches?.find((x) => x.targetId === t.target);
         return (
           <div key={i} style={{ padding: "10px 12px", borderBottom: "1px solid var(--line-1)", display: "flex", flexDirection: "column", gap: 6 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -241,6 +283,31 @@ export function TradeIdeas({
               {t.send.map((sid) => (P[sid] ? ` · ${P[sid].name}: ${P[sid].rate.toFixed(1)}/g` : "")).join("")}
             </div>
             {t.fit && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Why it works: {t.fit}.</div>}
+            {ai?.case && (
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                <Tag tone="value">YOUR CASE</Tag> {ai.case}
+              </div>
+            )}
+            {ai?.pitch && (
+              <div
+                style={{
+                  fontSize: 13,
+                  color: "var(--text-body)",
+                  background: "var(--bg-1)",
+                  border: "1px solid var(--line-1)",
+                  borderRadius: "var(--radius-sm)",
+                  padding: "8px 10px",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                  <Tag tone="accent">PITCH TO {t.partner.toUpperCase()}</Tag>
+                  <span style={{ flex: 1 }} />
+                  <CopyButton text={ai.pitch} />
+                </div>
+                {ai.pitch}
+              </div>
+            )}
+            {!ai && pitchesLoading && <Skeleton height={36} />}
             <div>
               <Button size="sm" variant="secondary" onClick={() => onLoad(t.partnerRosterId, t.send, t.target)}>
                 Load in trade builder → AI pitch
@@ -270,5 +337,65 @@ export function NeedsLoading() {
       <Skeleton height={44} />
       <Skeleton height={44} />
     </div>
+  );
+}
+
+export function StashCard({
+  needs,
+  notes,
+}: {
+  needs: NeedsResponse;
+  notes?: GamePlanResponse["plan"]["stash"];
+}) {
+  const P = needs.players;
+  if (!needs.stash.length) return null;
+  return (
+    <Card title="Stashes — buy before the market does" pad={false}>
+      {needs.stash.map((s) => {
+        const p = P[s.id];
+        if (!p) return null;
+        const note = notes?.find((n) => n.id === s.id)?.note;
+        const best = (p.hist ?? []).filter((h) => h.games >= 6).slice(0, 2);
+        return (
+          <div key={s.id} style={{ padding: "9px 12px", borderBottom: "1px solid var(--line-1)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <Tag tone={s.kind === "HOLD" ? "value" : "accent"}>{s.kind === "HOLD" ? "HOLD" : "STASH ADD"}</Tag>
+              <PositionBadge pos={p.pos as Position} size="sm" />
+              <b style={{ fontSize: 14 }}>{p.name}</b>
+              <span style={{ fontSize: 11, color: "var(--text-faint)" }}>
+                {p.team ?? "unsigned"}
+                {p.injury ? ` · ${p.injury}` : ""}
+                {s.where === "ir" ? " · in your IR slot (free to hold)" : s.where === "bench" ? " · your bench" : " · free agent"}
+              </span>
+              <span style={{ flex: 1 }} />
+              <StatDelta value={s.gainIfBack} suffix="/g" label="if back" />
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 4 }}>
+              If back: ~{s.ifBack.toFixed(1)}/g (80% of {best.map((h) => `${h.season} ${h.ppg}`).join(" & ")} ppg)
+              {p.age ? ` · age ${p.age}` : ""}
+              {p.trend30 ? ` · market ${p.trend30 > 0 ? "+" : ""}${p.trend30} in 30d` : ""}
+              {p.newsCount ? ` · ${p.newsCount} headline${p.newsCount > 1 ? "s" : ""} in 14d` : ""}
+            </div>
+            {p.headline && <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>“{p.headline}”</div>}
+            {s.kind === "SPEC" && s.bidNow != null && (
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+                Bid now <b style={{ color: "var(--accent)" }}>${s.bidNow}</b> vs ≈ <b style={{ color: "var(--text-body)" }}>${s.bidLater}</b> after a
+                signing/return (our bid formula on +{s.gainIfBack}/g)
+                {needs.irSlots.total > 0 && needs.irSlots.used >= needs.irSlots.total ? " · your IR slots are full, so this takes a bench spot" : ""}.
+              </div>
+            )}
+            {note && (
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+                <Tag>AI</Tag> {note}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-faint)" }}>
+        Sidelined (unsigned or IR/PUP/SUS) players whose return would lift your lineup ≥1 pt/g. Holds are never suggested as
+        cuts. Free-agent stashes need a live signal: recent headlines or a rising market value.
+      </div>
+    </Card>
   );
 }

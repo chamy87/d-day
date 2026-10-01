@@ -31,6 +31,17 @@ export type RatedPlayer = {
   ytdPpg: number | null;
   weekProj: number | null;
   rate: number;
+  /** This week's opponent (null with a team = bye). */
+  opp?: string | null;
+  /** nflverse seasons in league scoring, newest first. */
+  hist?: { season: number; ppg: number; games: number }[];
+  /** Expected pts/g if an unsigned or long-term-injured player gets back on the field. */
+  ifBack?: number | null;
+  /** Tagged headlines in the last 14 days (signing / return chatter is the signal). */
+  newsCount?: number;
+  headline?: string | null;
+  /** FantasyCalc 30-day value change — the market pricing in news. */
+  trend30?: number | null;
 };
 
 export function rateOf(input: {
@@ -51,8 +62,23 @@ export function rateOf(input: {
   return Math.round(rate * 10) / 10;
 }
 
-/** Available going forward (one-week OUT still counts; IR/PUP/SUS don't). */
-export const availableRate = (p: RatedPlayer) => (p.injury && LONG_TERM.has(p.injury) ? 0 : p.rate);
+/** Available going forward (one-week OUT still counts; IR/PUP/SUS and unsigned players don't). */
+export const availableRate = (p: RatedPlayer) => (!p.team || (p.injury && LONG_TERM.has(p.injury)) ? 0 : p.rate);
+
+/** Comeback haircut: rust, age, new offense. */
+const IF_BACK_FACTOR = 0.8;
+
+/**
+ * Expected rate if a sidelined/unsigned player returns: 80% of the average of
+ * his two most recent seasons with 6+ games (league scoring).
+ */
+export function ifBackRate(hist: { season: number; ppg: number; games: number }[] | undefined): number | null {
+  const q = (hist ?? []).filter((h) => h.games >= 6).slice(0, 2);
+  if (!q.length) return null;
+  return Math.round(IF_BACK_FACTOR * (q.reduce((s, h) => s + h.ppg, 0) / q.length) * 10) / 10;
+}
+
+export const isSidelined = (p: RatedPlayer) => !p.team || (!!p.injury && LONG_TERM.has(p.injury));
 
 export type TeamInput = { rosterId: number; name: string; players: string[] };
 
@@ -169,8 +195,11 @@ export function waiverIdeas(args: {
   weeksLeft: number;
   faabRemaining: number | null;
   trending: Map<string, number>;
+  /** Stash holds — never suggested as the cut. */
+  holds?: Set<string>;
 }): WaiverIdea[] {
   const { rosterPositions, mine, reserve, freeAgents, byId, needs, weeksLeft, faabRemaining, trending } = args;
+  const holds = args.holds ?? new Set<string>();
   const base = lineupRate(rosterPositions, mine, byId);
   const slots = skillSlots(rosterPositions);
   const starters = new Set(
@@ -183,7 +212,7 @@ export function waiverIdeas(args: {
   // Drop candidate: lowest-value skill bench player not on IR and not a starter.
   const dropPool = mine
     .map((id) => byId.get(id))
-    .filter((p): p is RatedPlayer => !!p && !starters.has(p.id) && !reserve.includes(p.id))
+    .filter((p): p is RatedPlayer => !!p && !starters.has(p.id) && !reserve.includes(p.id) && !holds.has(p.id))
     .sort((a, b) => (a.value ?? 0) - (b.value ?? 0) || a.rate - b.rate);
 
   const ideas: WaiverIdea[] = [];
@@ -193,18 +222,83 @@ export function waiverIdeas(args: {
     const needPos = needs.has(fa.pos);
     if (gain < 0.3 && !needPos) continue;
     const seasonGain = Math.round(gain * weeksLeft);
-    let bidPct: number | null = null;
-    let bid: number | null = null;
-    if (faabRemaining != null) {
-      const hot = (trending.get(fa.id) ?? 0) >= 10000 ? 1.25 : 1;
-      bidPct = Math.min(40, Math.max(gain > 0 ? 1 : 0, Math.round((seasonGain / 4) * hot)));
-      bid = Math.round((faabRemaining * bidPct) / 100);
-    }
+    const { bid, bidPct } = faabBid(gain, weeksLeft, faabRemaining, (trending.get(fa.id) ?? 0) >= 10000);
     const drop = dropPool.find((d) => d.id !== fa.id && (d.value ?? 0) < (fa.value ?? Infinity))?.id ?? dropPool[0]?.id ?? null;
     ideas.push({ id: fa.id, gain, seasonGain, bid, bidPct, drop, needPos });
   }
   const rate = (id: string) => byId.get(id)?.rate ?? 0;
   return ideas.sort((a, b) => b.gain - a.gain || Number(b.needPos) - Number(a.needPos) || rate(b.id) - rate(a.id)).slice(0, 10);
+}
+
+/** FAAB: 1% of remaining per 4 rest-of-season points (cap 40%), ×1.25 when heavily trending. */
+export function faabBid(
+  gain: number,
+  weeksLeft: number,
+  faabRemaining: number | null,
+  hot = false,
+): { bid: number | null; bidPct: number | null } {
+  if (faabRemaining == null) return { bid: null, bidPct: null };
+  const bidPct = Math.min(40, Math.max(gain > 0 ? 1 : 0, Math.round(((gain * weeksLeft) / 4) * (hot ? 1.25 : 1))));
+  return { bidPct, bid: Math.max(gain > 0 ? 1 : 0, Math.round((faabRemaining * bidPct) / 100)) };
+}
+
+export type StashIdea = {
+  id: string;
+  /** HOLD = on your roster, keep; SPEC = free agent worth a cheap speculative add. */
+  kind: "HOLD" | "SPEC";
+  where: "bench" | "ir" | "fa";
+  ifBack: number;
+  /** Your lineup gain if he returns at ifBack, pts/g. */
+  gainIfBack: number;
+  /** Speculative price now vs. what the bid formula says once he's signed/healthy (weeks left minus a 2-week signing / 4-week IR lag). */
+  bidNow: number | null;
+  bidLater: number | null;
+};
+
+/**
+ * Sidelined players (unsigned or long-term injured) with a real track record:
+ * keep yours if they'd start for you on return; flag free agents with live
+ * signals (recent headlines or a rising market) as cheap stashes now, before
+ * a signing reprices them.
+ */
+export function stashIdeas(args: {
+  rosterPositions: string[];
+  mine: string[];
+  reserve: string[];
+  freeAgents: RatedPlayer[];
+  byId: Map<string, RatedPlayer>;
+  weeksLeft: number;
+  faabRemaining: number | null;
+}): StashIdea[] {
+  const { rosterPositions, mine, reserve, freeAgents, byId, weeksLeft, faabRemaining } = args;
+  const minePlayers = mine.map((id) => byId.get(id)).filter((p): p is RatedPlayer => !!p);
+  const base = lineupRate(rosterPositions, mine.filter((id) => byId.has(id)), byId);
+  const gainIf = (p: RatedPlayer) => {
+    const sim = new Map(byId);
+    sim.set(p.id, { ...p, team: p.team ?? "FA", injury: null, rate: p.ifBack ?? 0 });
+    const ids = mine.includes(p.id) ? mine : [...mine, p.id];
+    return Math.round((lineupRate(rosterPositions, ids, sim) - base) * 10) / 10;
+  };
+  const out: StashIdea[] = [];
+  for (const p of minePlayers) {
+    if (!isSidelined(p) || !p.ifBack) continue;
+    const gainIfBack = gainIf(p);
+    if (gainIfBack < 1) continue;
+    out.push({ id: p.id, kind: "HOLD", where: reserve.includes(p.id) ? "ir" : "bench", ifBack: p.ifBack, gainIfBack, bidNow: null, bidLater: null });
+  }
+  for (const p of freeAgents) {
+    if (!isSidelined(p) || !p.ifBack) continue;
+    const signal = (p.newsCount ?? 0) > 0 || (p.trend30 ?? 0) > 0;
+    if (!signal) continue;
+    const gainIfBack = gainIf(p);
+    if (gainIfBack < 1) continue;
+    // Weeks he can actually help: unsigned ≈2 to sign and ramp; IR ≈4 minimum.
+    const lag = p.team ? 4 : 2;
+    const later = faabBid(gainIfBack, Math.max(1, weeksLeft - lag), faabRemaining, true);
+    const now = faabRemaining != null ? Math.max(1, Math.round(faabRemaining * 0.01)) : null;
+    out.push({ id: p.id, kind: "SPEC", where: "fa", ifBack: p.ifBack, gainIfBack, bidNow: now, bidLater: later.bid });
+  }
+  return out.sort((a, b) => b.gainIfBack - a.gainIfBack).slice(0, 6);
 }
 
 export type TradeIdea = {

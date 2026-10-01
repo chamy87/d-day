@@ -15,7 +15,8 @@ import { useIsMobile } from "@/lib/use-mobile";
 import { loadTeamPref, saveTeamPref } from "@/lib/session-client";
 import { AdvisorTab, type TradePreset } from "@/components/advisor";
 import { StartSit } from "@/components/start-sit";
-import { useNeeds, RosterBalance, WaiverIdeas, TradeIdeas, NeedsLoading } from "@/components/roster-needs";
+import { useNeeds, useGamePlan, RosterBalance, WaiverIdeas, TradeIdeas, StashCard, NeedsLoading } from "@/components/roster-needs";
+import { GamePlanTab } from "@/components/game-plan";
 import { TeamPickerModal, TeamChip } from "@/components/team-picker-modal";
 import { GlossaryButton } from "@/components/glossary";
 import { AccountButton } from "@/components/account";
@@ -25,7 +26,7 @@ import { useRouter } from "next/navigation";
 import type { DashboardResponse, DashboardPlayer } from "@/app/api/league/[id]/dashboard/route";
 import type { Insight } from "@/app/api/league/[id]/insights/route";
 
-const TABS = ["START/SIT", "MATCHUP", "WAIVERS", "TRADES", "NEWS"];
+const TABS = ["GAME PLAN", "START/SIT", "MATCHUP", "WAIVERS", "TRADES", "NEWS"];
 
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
@@ -75,7 +76,7 @@ function PlayerLine({ p, right }: { p: DashboardPlayer; right?: React.ReactNode 
 export function Dashboard({ leagueId }: { leagueId: string }) {
   const router = useRouter();
   const isMobile = useIsMobile();
-  const [tab, setTab] = React.useState("START/SIT");
+  const [tab, setTab] = React.useState("GAME PLAN");
   const [week, setWeek] = React.useState<number | null>(null);
   const [myUserId, setMyUserId] = React.useState("");
   const [prefsLoaded, setPrefsLoaded] = React.useState(false);
@@ -129,7 +130,23 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
     staleTime: 10 * 60 * 1000,
   });
 
-  const needs = useNeeds(leagueId, myRoster?.rosterId ?? null, tab === "WAIVERS" || tab === "TRADES");
+  const needs = useNeeds(leagueId, myRoster?.rosterId ?? null, tab === "GAME PLAN" || tab === "WAIVERS" || tab === "TRADES");
+  // Shares the cache with the GAME PLAN tab; only fetched once that tab asked for it.
+  const gamePlan = useGamePlan(leagueId, myRoster?.rosterId ?? null, false);
+  const loadTrade = (partner: number, myGives: string[], theyGive: string) => {
+    if (!myRoster) return;
+    setTradePreset({
+      key: (tradePreset?.key ?? 0) + 1,
+      preset: {
+        teamB: partner,
+        sends: {
+          [myRoster.rosterId]: myGives.map((playerId) => ({ playerId, toRosterId: partner })),
+          [partner]: [{ playerId: theyGive, toRosterId: myRoster.rosterId }],
+        },
+      },
+    });
+    setTab("TRADES");
+  };
 
   const insights = useQuery({
     queryKey: ["insights", leagueId, data?.week, myRoster?.rosterId],
@@ -283,6 +300,18 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
           </Toast>
         )}
 
+        {tab === "GAME PLAN" && (
+          <GamePlanTab
+            leagueId={leagueId}
+            data={data}
+            roster={myRoster}
+            needs={needs}
+            isMobile={isMobile}
+            onTab={setTab}
+            onLoadTrade={loadTrade}
+          />
+        )}
+
         {tab === "START/SIT" && (
           <StartSit
             data={data}
@@ -426,7 +455,10 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
                   {needs.error instanceof Error ? needs.error.message : "Try again shortly."}
                 </Toast>
               ) : needs.data ? (
-                <WaiverIdeas needs={needs.data} />
+                <>
+                  <StashCard needs={needs.data} notes={gamePlan.data?.plan.stash} />
+                  <WaiverIdeas needs={needs.data} />
+                </>
               ) : null}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -476,21 +508,7 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
                   </Toast>
                 ) : needs.data ? (
                   <>
-                    <TradeIdeas
-                      needs={needs.data}
-                      onLoad={(partner, myGives, theyGive) =>
-                        setTradePreset({
-                          key: Date.now(),
-                          preset: {
-                            teamB: partner,
-                            sends: {
-                              [myRoster.rosterId]: myGives.map((playerId) => ({ playerId, toRosterId: partner })),
-                              [partner]: [{ playerId: theyGive, toRosterId: myRoster.rosterId }],
-                            },
-                          },
-                        })
-                      }
-                    />
+                    <TradeIdeas needs={needs.data} pitches={gamePlan.data?.plan.trades} onLoad={loadTrade} />
                     <RosterBalance needs={needs.data} />
                   </>
                 ) : null}

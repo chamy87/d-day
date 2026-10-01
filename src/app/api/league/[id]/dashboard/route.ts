@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { sleeper, scoringLabel } from "@/lib/sleeper";
+import { sleeper, scoringLabel, reserveRules } from "@/lib/sleeper";
+import type { ReserveRules } from "@/lib/lineup";
 import { scoreProjection } from "@/lib/vbd";
 import { ensurePlayers, ensureWeekProjections, ensureValues, ensureInjuryComments } from "@/lib/ingest";
 import { relevantNews } from "@/lib/news";
@@ -32,7 +33,7 @@ export type DashboardPlayer = {
 };
 
 export type DashboardResponse = {
-  league: { leagueId: string; name: string; season: string; status: string; scoring: string; rosterPositions: string[]; draftId: string | null };
+  league: { leagueId: string; name: string; season: string; status: string; scoring: string; rosterPositions: string[]; draftId: string | null; reserveRules: ReserveRules };
   week: number;
   currentWeek: number;
   users: { userId: string; name: string; teamName: string | null }[];
@@ -225,6 +226,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       scoring: scoringLabel(league.scoring_settings?.rec),
       rosterPositions: league.roster_positions,
       draftId: league.draft_id,
+      reserveRules: reserveRules(league),
     },
     week,
     currentWeek,

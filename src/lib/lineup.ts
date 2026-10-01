@@ -207,22 +207,28 @@ export function planLineup(
   // Pair "start" with "bench" by slot so each move reads as one decision.
   const optimalSet = new Set(rows.map((r) => r.optimal).filter(Boolean) as string[]);
   const currentSet = new Set(rows.map((r) => r.current).filter(Boolean) as string[]);
-  const ins = rows.filter((r) => r.optimal && !currentSet.has(r.optimal)).map((r) => r.optimal!);
+  // Pair each new starter with the player leaving that same slot; leftovers by points.
   const outs = rows
-    .filter((r) => !r.current || !optimalSet.has(r.current))
-    .map((r) => ({ id: r.current, slot: r.slot }))
-    .sort((a, b) => (a.id ? pts(a.id) : -1) - (b.id ? pts(b.id) : -1));
-  const moves: LineupMove[] = ins
-    .sort((a, b) => pts(b) - pts(a))
-    .map((id, k) => {
-      const out = outs[k];
-      return {
-        start: id,
-        bench: out?.id ?? null,
-        slot: rows.find((r) => r.optimal === id)?.slot ?? "",
-        gain: Math.round((pts(id) - (out?.id ? pts(out.id) : 0)) * 10) / 10,
-      };
-    })
+    .map((r, i) => ({ id: r.current, i }))
+    .filter((o) => !o.id || !optimalSet.has(o.id));
+  const used = new Set<number>();
+  const pairs: { start: string; out: (typeof outs)[number] | null; slot: string }[] = [];
+  rows.forEach((r, i) => {
+    if (!r.optimal || currentSet.has(r.optimal)) return;
+    const same = outs.find((o) => o.i === i && !used.has(o.i));
+    if (same) used.add(same.i);
+    pairs.push({ start: r.optimal, out: same ?? null, slot: r.slot });
+  });
+  const rest = outs.filter((o) => !used.has(o.i)).sort((a, b) => (a.id ? pts(a.id) : -1) - (b.id ? pts(b.id) : -1));
+  for (const p of pairs) if (!p.out) p.out = rest.shift() ?? null;
+  const moves: LineupMove[] = pairs
+    .map((p) => ({
+      start: p.start,
+      bench: p.out?.id ?? null,
+      slot: p.slot,
+      gain: Math.round((pts(p.start) - (p.out?.id ? pts(p.out.id) : 0)) * 10) / 10,
+    }))
+    .sort((a, b) => b.gain - a.gain)
     .filter((m) => m.gain > 0.05);
 
   // Alerts on what's actually set right now.
@@ -256,4 +262,55 @@ export function planLineup(
     moves,
     alerts,
   };
+}
+
+export type ReserveRules = {
+  slots: number;
+  allowOut: boolean;
+  allowDoubtful: boolean;
+  allowSus: boolean;
+  allowNa: boolean;
+};
+
+export type IrMove = { kind: "ACTIVATE" | "TO_IR" | "IR_FULL"; playerId: string };
+
+/** Whether Sleeper lets this designation sit in an IR slot under the league's rules. */
+export function irEligible(designation: string | null | undefined, rules: ReserveRules): boolean {
+  switch (designation) {
+    case "IR":
+    case "PUP":
+      return true;
+    case "OUT":
+      return rules.allowOut;
+    case "D":
+      return rules.allowDoubtful;
+    case "SUS":
+      return rules.allowSus;
+    case "NA":
+      return rules.allowNa;
+    default:
+      return false;
+  }
+}
+
+/**
+ * IR-slot housekeeping: activate players no longer eligible (Sleeper blocks
+ * your adds until you do), and move eligible bench players into open IR
+ * slots to free a bench spot.
+ */
+export function irMoves(
+  players: string[],
+  reserve: string[],
+  designation: (id: string) => string | null | undefined,
+  rules: ReserveRules,
+): IrMove[] {
+  const moves: IrMove[] = [];
+  for (const id of reserve) if (!irEligible(designation(id), rules)) moves.push({ kind: "ACTIVATE", playerId: id });
+  let open = rules.slots - reserve.length + moves.length;
+  for (const id of players) {
+    if (reserve.includes(id) || !irEligible(designation(id), rules)) continue;
+    moves.push({ kind: open > 0 ? "TO_IR" : "IR_FULL", playerId: id });
+    open--;
+  }
+  return moves;
 }

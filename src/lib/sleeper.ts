@@ -12,7 +12,16 @@ export type SleeperLeague = {
   scoring_settings: Record<string, number>;
   draft_id: string | null;
   /** waiver_type 2 = FAAB; playoff_week_start ends the regular season. */
-  settings?: { waiver_type?: number; waiver_budget?: number; playoff_week_start?: number } & Record<string, number | undefined>;
+  settings?: {
+    waiver_type?: number;
+    waiver_budget?: number;
+    playoff_week_start?: number;
+    reserve_slots?: number;
+    reserve_allow_out?: number;
+    reserve_allow_doubtful?: number;
+    reserve_allow_sus?: number;
+    reserve_allow_na?: number;
+  } & Record<string, number | undefined>;
 };
 
 export type SleeperUser = {
@@ -204,4 +213,16 @@ export function injuryTag(injuryStatus: string | null | undefined): string | nul
     default:
       return null;
   }
+}
+
+/** League IR-slot rules in the shape the lineup lib uses. */
+export function reserveRules(league: SleeperLeague) {
+  const st = league.settings ?? {};
+  return {
+    slots: st.reserve_slots ?? 0,
+    allowOut: !!st.reserve_allow_out,
+    allowDoubtful: !!st.reserve_allow_doubtful,
+    allowSus: !!st.reserve_allow_sus,
+    allowNa: !!st.reserve_allow_na,
+  };
 }

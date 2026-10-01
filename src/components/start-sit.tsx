@@ -6,7 +6,7 @@ import { Tag } from "@/components/ui/tag";
 import { Button } from "@/components/ui/button";
 import { StatDelta } from "@/components/ui/stat-delta";
 import { PositionBadge, type Position } from "@/components/ui/position-badge";
-import { planLineup, expectedPoints, PLAY_PROB, type LineupPlayer, type LineupPlan } from "@/lib/lineup";
+import { planLineup, expectedPoints, irMoves, PLAY_PROB, type LineupPlayer, type LineupPlan } from "@/lib/lineup";
 import type { DashboardResponse, DashboardPlayer } from "@/app/api/league/[id]/dashboard/route";
 
 const SLOT_LABEL: Record<string, string> = { SUPER_FLEX: "SFLX", WRRB_FLEX: "W/R", REC_FLEX: "W/T", FLEX: "FLEX" };
@@ -95,7 +95,15 @@ export function StartSit({
     .filter((p) => p.injury)
     .sort((a, b) => (PLAY_PROB[a.injury!] ?? 1) - (PLAY_PROB[b.injury!] ?? 1));
   const starterSet = new Set(roster.starters);
-  const bench = roster.players.filter((pid) => !starterSet.has(pid)).map(player).sort((a, b) => exp(b.id) - exp(a.id));
+  const reserveSet = new Set(roster.reserve);
+  // IR-slot players aren't bench: they can't start and don't use a bench spot.
+  const bench = roster.players
+    .filter((pid) => !starterSet.has(pid) && !reserveSet.has(pid))
+    .map(player)
+    .sort((a, b) => exp(b.id) - exp(a.id));
+  const irSlot = roster.reserve.map(player);
+  const rules = data.league.reserveRules;
+  const ir = rules ? irMoves(roster.players, roster.reserve, (id) => data.playersById[id]?.injury, rules) : [];
 
   const slotsCard = (
     <Card
@@ -209,7 +217,18 @@ export function StartSit({
             </div>
           );
         })}
-        {!plan.moves.length && !plan.alerts.length && (
+        {ir.map((m) => (
+          <div key={`ir-${m.playerId}`}>
+            <Tag tone={m.kind === "ACTIVATE" ? "reach" : "accent"}>{m.kind === "ACTIVATE" ? "ACTIVATE" : "IR"}</Tag>{" "}
+            <b style={{ color: "var(--text-body)" }}>{player(m.playerId).name}</b>{" "}
+            {m.kind === "ACTIVATE"
+              ? "is in an IR slot but no longer IR-eligible — Sleeper blocks your adds and trades until you move the player out."
+              : m.kind === "TO_IR"
+                ? `is ${player(m.playerId).injury} and eligible — move to an open IR slot to free a bench spot.`
+                : `is IR-eligible but your ${rules?.slots ?? 0} IR slots are full.`}
+          </div>
+        ))}
+        {!plan.moves.length && !plan.alerts.length && !ir.length && (
           <span style={{ color: "var(--text-faint)" }}>Lineup is optimal — nothing to change.</span>
         )}
         {aiFlags}
@@ -254,7 +273,7 @@ export function StartSit({
     </Card>
   );
 
-  const benchCard = bench.length ? (
+  const benchCard = bench.length || irSlot.length ? (
     <Card title="Bench — expected pts" pad={false}>
       {bench.map((p) => (
         <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 12px", borderBottom: "1px solid var(--line-1)" }}>
@@ -271,6 +290,29 @@ export function StartSit({
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--text-muted)" }}>{exp(p.id).toFixed(1)}</span>
         </div>
       ))}
+      {irSlot.length > 0 && (
+        <>
+          <div
+            style={{
+              padding: "8px 12px 4px",
+              fontFamily: "var(--font-mono)",
+              fontSize: 9,
+              letterSpacing: ".08em",
+              color: "var(--text-faint)",
+              borderBottom: "1px solid var(--line-1)",
+            }}
+          >
+            IR SLOTS {roster.reserve.length}/{rules?.slots ?? roster.reserve.length} — DON&apos;T USE A BENCH SPOT
+          </div>
+          {irSlot.map((p) => (
+            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 12px", borderBottom: "1px solid var(--line-1)", opacity: 0.75 }}>
+              <PositionBadge pos={(p.pos as Position) ?? "BN"} size="sm" />
+              <span style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>{p.name}</span>
+              {p.injury ? <Tag tone={injuryTone(p.injury)}>{p.injury}</Tag> : <Tag tone="reach">HEALTHY</Tag>}
+            </div>
+          ))}
+        </>
+      )}
     </Card>
   ) : null;
 
