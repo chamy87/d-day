@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { sleeper } from "@/lib/sleeper";
+import { sleeper, weekStarters } from "@/lib/sleeper";
 import { scoreProjection } from "@/lib/vbd";
 import { activeProvider, aiReason, currentModel } from "@/lib/ai";
 import { planLineup, expectedPoints, type LineupPlayer } from "@/lib/lineup";
@@ -38,10 +38,11 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     return NextResponse.json({ insights: cached.insights as Insight[], cached: true });
   }
 
-  const [league, rosters, state] = await Promise.all([
+  const [league, rosters, state, matchups] = await Promise.all([
     sleeper.league(id),
     sleeper.leagueRosters(id),
     sleeper.state(),
+    sleeper.matchups(id, week).catch(() => []),
   ]);
   if (!league) return NextResponse.json({ error: "League not found." }, { status: 404 });
   const roster = rosters.find((r) => r.roster_id === rosterId);
@@ -60,7 +61,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   ]);
   const projById = new Map((projections ?? []).map((r) => [r.sleeper_id, r]));
   const injById = new Map((injuries ?? []).map((r) => [r.sleeper_id, r]));
-  const starters = new Set(roster.starters ?? []);
+  const weekLineup = weekStarters(roster, matchups);
+  const starters = new Set(weekLineup);
   const byId: Record<string, LineupPlayer> = {};
   const nameOf = new Map((players ?? []).map((p) => [p.sleeper_id, p.name]));
   const lines = (players ?? [])
@@ -75,7 +77,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     })
     .join("\n");
   const reserve = new Set(roster.reserve ?? []);
-  const plan = planLineup(league.roster_positions, roster.starters ?? [], ids.filter((pid) => !reserve.has(pid)), byId);
+  const plan = planLineup(league.roster_positions, weekLineup, ids.filter((pid) => !reserve.has(pid)), byId);
   const verdict = plan.moves.length
     ? plan.moves.map((m) => `start ${nameOf.get(m.start)} over ${m.bench ? nameOf.get(m.bench) : "empty slot"} (+${m.gain})`).join("; ")
     : "current lineup is already optimal";

@@ -4,6 +4,7 @@ import { computeNeeds } from "@/lib/needs";
 import { planLineup, type LineupPlayer } from "@/lib/lineup";
 import { positionStrength, type RatedPlayer } from "@/lib/roster-needs";
 import { activeProvider, aiReason, currentModel } from "@/lib/ai";
+import { sleeper, weekStarters } from "@/lib/sleeper";
 import { scoreProjection } from "@/lib/vbd";
 
 export const dynamic = "force-dynamic";
@@ -44,6 +45,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   if ("error" in res) return NextResponse.json({ error: res.error }, { status: res.status });
   const { data: needs, ctx: c } = res;
   const P = (pid: string): RatedPlayer | undefined => c.byId.get(pid);
+  const starters = weekStarters(c.mine, await sleeper.matchups(id, needs.week).catch(() => []));
   const extraName = (pid: string) => extraNames.get(pid);
   const name = (pid: string) => P(pid)?.name ?? extraName(pid) ?? pid;
 
@@ -51,7 +53,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   const signature = [
     needs.week,
     [...(c.mine.players ?? [])].sort().join(","),
-    (c.mine.starters ?? []).join(","),
+    starters.join(","),
     needs.trades.map((t) => `${t.target}:${t.send.join("+")}`).join("|"),
     needs.stash.map((s) => s.id).join(","),
     needs.seasonOut.map((s) => s.id).join(","),
@@ -100,7 +102,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   const reserve = new Set(c.mine.reserve ?? []);
   const plan = planLineup(
     c.league.roster_positions,
-    c.mine.starters ?? [],
+    starters,
     (c.mine.players ?? []).filter((pid) => !reserve.has(pid)),
     byLineup,
   );
@@ -163,7 +165,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   const prompt = `${c.league.season} week ${needs.week}, ${needs.weeksLeft} weeks left. Scoring rec=${c.league.scoring_settings?.rec ?? 0}. FAAB: ${needs.faab ? `$${needs.faab.remaining}/${needs.faab.budget}` : "rolling waivers"}. IR slots ${needs.irSlots.used}/${needs.irSlots.total}; IR moves: ${irBlock}.
 
 MY ROSTER:
-${(c.mine.players ?? []).map((pid) => (P(pid) ? `${reserve.has(pid) ? "[IR SLOT] " : (c.mine.starters ?? []).includes(pid) ? "[STARTER] " : "[BENCH] "}${line(P(pid)!)}` : "")).filter(Boolean).join("\n")}
+${(c.mine.players ?? []).map((pid) => (P(pid) ? `${reserve.has(pid) ? "[IR SLOT] " : starters.includes(pid) ? "[STARTER] " : "[BENCH] "}${line(P(pid)!)}` : "")).filter(Boolean).join("\n")}
 
 ROSTER BALANCE VS LEAGUE:
 ${balance}

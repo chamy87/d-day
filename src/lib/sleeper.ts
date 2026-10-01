@@ -104,11 +104,19 @@ export type SleeperMatchup = {
   players: string[] | null;
 };
 
+/**
+ * Sleeper fronts rosters/matchups with a ~5-10 min CDN cache. Lineup data must
+ * be near-live (a swap made 2 minutes ago has to show), so these calls carry a
+ * 1-minute cache-buster.
+ */
+const fresh = () => `t=${Math.floor(Date.now() / 60000)}`;
+
 export const sleeper = {
   league: (id: string) => get<SleeperLeague | null>(`/league/${id}`),
   leagueUsers: (id: string) => get<SleeperUser[]>(`/league/${id}/users`),
-  leagueRosters: (id: string) => get<SleeperRoster[]>(`/league/${id}/rosters`),
-  matchups: (id: string, week: number) => get<SleeperMatchup[]>(`/league/${id}/matchups/${week}`),
+  leagueRosters: (id: string) => get<SleeperRoster[]>(`/league/${id}/rosters?${fresh()}`),
+  /** Per-week lineup (starters) — authoritative for that week, unlike roster.starters. */
+  matchups: (id: string, week: number) => get<SleeperMatchup[]>(`/league/${id}/matchups/${week}?${fresh()}`),
   trendingAdds: () =>
     get<{ player_id: string; count: number }[]>(
       `/players/nfl/trending/add?lookback_hours=24&limit=30`,
@@ -225,4 +233,10 @@ export function reserveRules(league: SleeperLeague) {
     allowSus: !!st.reserve_allow_sus,
     allowNa: !!st.reserve_allow_na,
   };
+}
+
+/** The lineup actually set for a week: matchup starters, falling back to the roster's. */
+export function weekStarters(roster: SleeperRoster, matchups: SleeperMatchup[]): string[] {
+  const m = matchups.find((x) => x.roster_id === roster.roster_id);
+  return m?.starters?.length ? m.starters : (roster.starters ?? []);
 }

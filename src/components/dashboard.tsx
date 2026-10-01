@@ -105,6 +105,9 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
     queryKey: ["dashboard", leagueId, week],
     queryFn: () => getJson<DashboardResponse>(`/api/league/${leagueId}/dashboard${week ? `?week=${week}` : ""}`),
     staleTime: 60 * 1000,
+    // Lineups change in the Sleeper app — pick that up when you come back, and every 2 min.
+    refetchOnWindowFocus: true,
+    refetchInterval: 2 * 60 * 1000,
   });
   // On-demand injury check: server accepts ≤5-min-old designations instead of 1h.
   const freshCheck = useMutation({

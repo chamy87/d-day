@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { sleeper, scoringLabel, reserveRules } from "@/lib/sleeper";
+import { sleeper, scoringLabel, reserveRules, weekStarters } from "@/lib/sleeper";
 import type { ReserveRules } from "@/lib/lineup";
 import { scoreProjection } from "@/lib/vbd";
 import { ensurePlayers, ensureWeekProjections, ensureValues, ensureInjuryComments } from "@/lib/ingest";
@@ -261,7 +261,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     rosters: rosters.map((r) => ({
       rosterId: r.roster_id,
       ownerId: r.owner_id,
-      starters: r.starters ?? [],
+      // The selected week's lineup, not the roster's (cached, week-agnostic) starters.
+      starters: weekStarters(r, matchups),
       players: r.players ?? [],
       reserve: r.reserve ?? [],
     })),
