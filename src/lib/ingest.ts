@@ -96,26 +96,132 @@ export async function ensureProjections(
   return true;
 }
 
-/** Sleeper weekly projections (fragile) → projections table, week N. */
+/**
+ * Sleeper weekly projections (fragile) → projections table, week N, with the
+ * opponent (none = bye). The same payload embeds each player's *current*
+ * injury designation, so it doubles as the live injuries feed — callers pass
+ * a short maxAgeMs (≈1h) when start/sit decisions depend on it.
+ */
 export async function ensureWeekProjections(
   db: SupabaseClient,
   season: string,
   week: number,
   force = false,
+  maxAgeMs = STALE_MS,
 ): Promise<boolean> {
   const fresh = await newestUpdate(db, "projections", { season: Number(season), week });
-  if (!force && isFresh(fresh)) return false;
-  const rows = (await sleeper.weekProjections(season, week))
+  if (!force && fresh != null && Date.now() - fresh < maxAgeMs) return false;
+  const source = await sleeper.weekProjections(season, week);
+  const now = new Date().toISOString();
+  const rows = source
     .filter((p) => p.stats && Object.keys(p.stats).length > 0)
     .map((p) => ({
       season: Number(season),
       week,
       sleeper_id: p.player_id,
       stats: p.stats,
-      updated_at: new Date().toISOString(),
+      opponent: p.opponent ?? null,
+      updated_at: now,
     }));
   if (!rows.length) throw new Error("weekly projections source returned no rows");
   await chunkedUpsert(db, "projections", rows, "season,week,sleeper_id");
+
+  const injuries = source
+    .filter((p) => p.player)
+    .map((p) => ({
+      sleeper_id: p.player_id,
+      designation: injuryTag(p.player?.injury_status),
+      detail: p.player?.injury_body_part || p.player?.injury_notes || null,
+      updated_at: now,
+    }));
+  await chunkedUpsert(db, "injuries", injuries, "sleeper_id");
+  // Keep players.status in step so every surface agrees between daily refreshes.
+  const desired = new Map(injuries.map((i) => [i.sleeper_id, i.designation]));
+  const flaggedNow = await fetchAll<{ sleeper_id: string; status: string }>((from, to) =>
+    db.from("players").select("sleeper_id,status").not("status", "is", null).range(from, to),
+  );
+  const current = new Map(flaggedNow.map((p) => [p.sleeper_id, p.status]));
+  const toSet = new Map<string, string[]>();
+  for (const [id, d] of desired) {
+    if (d && current.get(id) !== d) toSet.set(d, [...(toSet.get(d) ?? []), id]);
+  }
+  const toClear = flaggedNow.filter((p) => desired.has(p.sleeper_id) && !desired.get(p.sleeper_id)).map((p) => p.sleeper_id);
+  for (const [d, list] of toSet) {
+    for (let i = 0; i < list.length; i += 200) {
+      await db.from("players").update({ status: d }).in("sleeper_id", list.slice(i, i + 200));
+    }
+  }
+  for (let i = 0; i < toClear.length; i += 200) {
+    await db.from("players").update({ status: null }).in("sleeper_id", toClear.slice(i, i + 200));
+  }
+  return true;
+}
+
+const ESPN_TEAM: Record<string, string> = { WSH: "WAS" };
+
+/**
+ * ESPN's public injury report → injuries.comment for players Sleeper already
+ * flags (matched on name + team). Adds the practice/beat-writer context
+ * ("limited Wednesday, expected to play") that a bare designation lacks.
+ */
+export async function ensureInjuryComments(db: SupabaseClient): Promise<number> {
+  const res = await fetch("https://site.api.espn.com/apis/site/v2/sports/football/nfl/injuries", {
+    next: { revalidate: 0 },
+  });
+  if (!res.ok) throw new Error(`ESPN injuries → ${res.status}`);
+  const body = (await res.json()) as {
+    injuries: {
+      injuries: {
+        status: string;
+        date?: string;
+        shortComment?: string;
+        athlete?: { displayName?: string; team?: { abbreviation?: string } };
+      }[];
+    }[];
+  };
+  const { data: flagged } = await db.from("injuries").select("sleeper_id").not("designation", "is", null);
+  const ids = (flagged ?? []).map((f) => f.sleeper_id);
+  const players: { sleeper_id: string; name: string; team: string | null }[] = [];
+  for (let i = 0; i < ids.length; i += 300) {
+    const { data } = await db.from("players").select("sleeper_id,name,team").in("sleeper_id", ids.slice(i, i + 300));
+    players.push(...(data ?? []));
+  }
+  const byKey = new Map(players.map((p) => [`${normalizeName(p.name)}|${p.team ?? ""}`, p.sleeper_id]));
+  const updates: { sleeper_id: string; comment: string; comment_at: string | null }[] = [];
+  for (const team of body.injuries ?? []) {
+    for (const inj of team.injuries ?? []) {
+      if (inj.status === "Active" || !inj.shortComment || !inj.athlete?.displayName) continue;
+      const abbr = inj.athlete.team?.abbreviation ?? "";
+      const id = byKey.get(`${normalizeName(inj.athlete.displayName)}|${ESPN_TEAM[abbr] ?? abbr}`);
+      if (id) updates.push({ sleeper_id: id, comment: inj.shortComment.slice(0, 400), comment_at: inj.date ?? null });
+    }
+  }
+  // Rows already exist (they were flagged), so the upsert only touches comment columns.
+  await chunkedUpsert(db, "injuries", updates, "sleeper_id");
+  return updates.length;
+}
+
+/** Sleeper season-to-date actuals → player_stats_ytd (raw stat keys). */
+export async function ensureYtdStats(
+  db: SupabaseClient,
+  season: string,
+  force = false,
+  maxAgeMs = 6 * 60 * 60 * 1000,
+): Promise<boolean> {
+  const fresh = await newestUpdate(db, "player_stats_ytd", { season: Number(season) });
+  if (!force && fresh != null && Date.now() - fresh < maxAgeMs) return false;
+  const now = new Date().toISOString();
+  const rows = (await sleeper.seasonStats(season))
+    .filter((p) => p.stats && (p.stats.gp ?? 0) > 0)
+    .map((p) => ({
+      season: Number(season),
+      sleeper_id: p.player_id,
+      gp: Math.round(p.stats!.gp ?? 0),
+      stats: p.stats,
+      updated_at: now,
+    }));
+  if (!rows.length) return false; // preseason: nothing played yet
+  await chunkedUpsert(db, "player_stats_ytd", rows, "season,sleeper_id");
   return true;
 }
 

@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { sleeper } from "@/lib/sleeper";
 import { scoreProjection } from "@/lib/vbd";
 import { activeProvider, aiReason, currentModel } from "@/lib/ai";
+import { planLineup, expectedPoints, type LineupPlayer } from "@/lib/lineup";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -47,27 +48,40 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   if (!roster) return NextResponse.json({ error: "Roster not found." }, { status: 404 });
 
   const ids = roster.players ?? [];
-  const [{ data: players }, { data: projections }] = await Promise.all([
+  const [{ data: players }, { data: projections }, { data: injuries }] = await Promise.all([
     db.from("players").select("sleeper_id,name,team,pos,bye,status").in("sleeper_id", ids),
     db
       .from("projections")
-      .select("sleeper_id,stats")
+      .select("sleeper_id,stats,opponent")
       .eq("season", Number(state.season))
       .eq("week", week)
       .in("sleeper_id", ids),
+    db.from("injuries").select("sleeper_id,detail,comment").in("sleeper_id", ids),
   ]);
-  const projById = new Map((projections ?? []).map((r) => [r.sleeper_id, r.stats as Record<string, number>]));
+  const projById = new Map((projections ?? []).map((r) => [r.sleeper_id, r]));
+  const injById = new Map((injuries ?? []).map((r) => [r.sleeper_id, r]));
   const starters = new Set(roster.starters ?? []);
+  const byId: Record<string, LineupPlayer> = {};
+  const nameOf = new Map((players ?? []).map((p) => [p.sleeper_id, p.name]));
   const lines = (players ?? [])
     .map((p) => {
-      const stats = projById.get(p.sleeper_id);
-      const proj = stats ? scoreProjection(stats, league.scoring_settings ?? {}) : null;
-      return `${starters.has(p.sleeper_id) ? "STARTER" : "BENCH"} ${p.pos} ${p.name} (${p.team ?? "FA"})${p.status ? ` [${p.status}]` : ""}${p.bye ? ` bye ${p.bye}` : ""} proj ${proj ?? "n/a"}`;
+      const row = projById.get(p.sleeper_id);
+      const proj = row ? scoreProjection(row.stats as Record<string, number>, league.scoring_settings ?? {}) : null;
+      const onBye = !!p.team && !!row && !row.opponent;
+      byId[p.sleeper_id] = { id: p.sleeper_id, pos: p.pos, proj, injury: p.status, onBye };
+      const inj = p.status ? injById.get(p.sleeper_id) : null;
+      const note = inj ? ` (${[inj.detail, inj.comment].filter(Boolean).join(" — ").slice(0, 160)})` : "";
+      return `${starters.has(p.sleeper_id) ? "STARTER" : "BENCH"} ${p.pos} ${p.name} (${p.team ?? "FA"}${row?.opponent ? ` vs ${row.opponent}` : onBye ? " BYE" : ""})${p.status ? ` [${p.status}]${note}` : ""} proj ${proj ?? "n/a"} expected ${expectedPoints(byId[p.sleeper_id])}`;
     })
     .join("\n");
+  const reserve = new Set(roster.reserve ?? []);
+  const plan = planLineup(league.roster_positions, roster.starters ?? [], ids.filter((pid) => !reserve.has(pid)), byId);
+  const verdict = plan.moves.length
+    ? plan.moves.map((m) => `start ${nameOf.get(m.start)} over ${m.bench ? nameOf.get(m.bench) : "empty slot"} (+${m.gain})`).join("; ")
+    : "current lineup is already optimal";
 
-  const system = `You are D-Day, a terse tactical fantasy football co-manager. Voice: second person, one clause per insight, numbers lead, no hype, no emoji. Output ONLY a JSON array (max 4 items) of {"tone":"value"|"reach"|"neutral","tag":"START"|"SIT"|"RISK"|"BYE"|"NOTE","text":"..."} — each text is a single clause under 120 characters.`;
-  const prompt = `Week ${week}, ${league.season} season, scoring rec=${league.scoring_settings?.rec ?? 0}. My roster with projections:\n${lines}\n\nGive the 2-4 most decision-relevant start/sit flags for this week.`;
+  const system = `You are D-Day, a terse tactical fantasy football co-manager. Voice: second person, one clause per insight, numbers lead, no hype, no emoji. The optimizer's verdict (expected points = projection × chance to play: Q 80%, D 20%, OUT/IR 0) is authoritative — never contradict it; add what it can't see: practice-report context, timing of inactives, matchup notes. Output ONLY a JSON array (max 4 items) of {"tone":"value"|"reach"|"neutral","tag":"START"|"SIT"|"RISK"|"BYE"|"NOTE","text":"..."} — each text is a single clause under 120 characters.`;
+  const prompt = `Week ${week}, ${league.season} season, scoring rec=${league.scoring_settings?.rec ?? 0}. My roster with projections:\n${lines}\n\nOptimizer verdict: ${verdict}. Set lineup ${plan.currentTotal} expected pts, best ${plan.optimalTotal}.\n\nGive the 2-4 most decision-relevant start/sit flags for this week.`;
 
   let insights: Insight[] = [];
   try {

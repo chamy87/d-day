@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { sleeper, scoringLabel } from "@/lib/sleeper";
 import { scoreProjection } from "@/lib/vbd";
-import { ensurePlayers, ensureWeekProjections, ensureValues } from "@/lib/ingest";
+import { ensurePlayers, ensureWeekProjections, ensureValues, ensureInjuryComments } from "@/lib/ingest";
 import { relevantNews } from "@/lib/news";
 import type { NewsItem } from "@/lib/news";
+import { weekSchedule, type TeamGame } from "@/lib/schedule";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -19,6 +20,15 @@ export type DashboardPlayer = {
   proj: number | null;
   /** FantasyCalc market value for this league's shape. */
   value: number | null;
+  /** Body part / note behind the designation (Sleeper), plus ESPN's report line. */
+  injuryDetail?: string | null;
+  injuryComment?: string | null;
+  injuryCommentAt?: string | null;
+  /** This week's game; null with a team = bye. */
+  game?: TeamGame | null;
+  onBye?: boolean;
+  /** Game kicked off — lineup slot is locked on Sleeper. */
+  locked?: boolean;
 };
 
 export type DashboardResponse = {
@@ -26,11 +36,13 @@ export type DashboardResponse = {
   week: number;
   currentWeek: number;
   users: { userId: string; name: string; teamName: string | null }[];
-  rosters: { rosterId: number; ownerId: string | null; starters: string[]; players: string[] }[];
+  rosters: { rosterId: number; ownerId: string | null; starters: string[]; players: string[]; reserve: string[] }[];
   matchups: { matchupId: number | null; rosterId: number; points: number }[];
   playersById: Record<string, DashboardPlayer>;
   waivers: { id: string; adds24h: number; faab: number; value: number | null }[];
   news: NewsItem[];
+  /** Last refresh of projections + injury designations for this week. */
+  injuriesAsOf: string | null;
   degraded: string[];
 };
 
@@ -49,7 +61,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   if (!league) return NextResponse.json({ error: "League not found on Sleeper." }, { status: 404 });
 
   const currentWeek = Math.min(18, Math.max(1, state.week || 1));
-  const weekParam = Number(new URL(req.url).searchParams.get("week"));
+  const params = new URL(req.url).searchParams;
+  const weekParam = Number(params.get("week"));
+  // On-demand injury check: accept data up to 5 min old instead of an hour.
+  const fresh = params.has("fresh");
   const week = weekParam >= 1 && weekParam <= 18 ? weekParam : currentWeek;
 
   const db = supabaseAdmin();
@@ -60,7 +75,15 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     degraded.push("players");
   }
   try {
-    await ensureWeekProjections(db, state.season, week);
+    // Current week refreshes hourly: the same payload carries live injury designations.
+    const refreshed = await ensureWeekProjections(
+      db,
+      state.season,
+      week,
+      false,
+      week === currentWeek ? (fresh ? 5 : 60) * 60 * 1000 : undefined,
+    );
+    if (refreshed && week === currentWeek) await ensureInjuryComments(db).catch(() => 0);
   } catch {
     degraded.push("projections");
   }
@@ -73,7 +96,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     degraded.push("values");
   }
 
-  const [matchups, trending] = await Promise.all([
+  const [matchups, trending, schedule] = await Promise.all([
     sleeper.matchups(id, week).catch(() => {
       degraded.push("matchups");
       return [];
@@ -81,6 +104,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     sleeper.trendingAdds().catch(() => {
       degraded.push("trending");
       return [];
+    }),
+    weekSchedule(state.season, week).catch(() => {
+      degraded.push("schedule");
+      return new Map<string, TeamGame>();
     }),
   ]);
 
@@ -91,30 +118,41 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
 
   const ids = Array.from(relevant);
   const playerRows: { sleeper_id: string; name: string; team: string | null; pos: string; bye: number | null; status: string | null }[] = [];
-  const projRows: { sleeper_id: string; stats: Record<string, number> }[] = [];
+  const projRows: { sleeper_id: string; stats: Record<string, number>; opponent: string | null; updated_at: string }[] = [];
   const valueRows: { sleeper_id: string; value: number }[] = [];
+  const injuryRows: { sleeper_id: string; designation: string | null; detail: string | null; comment: string | null; comment_at: string | null }[] = [];
   for (let i = 0; i < ids.length; i += 150) {
     const chunk = ids.slice(i, i + 150);
-    const [{ data: p }, { data: pr }, { data: vr }] = await Promise.all([
+    const [{ data: p }, { data: pr }, { data: vr }, { data: ir }] = await Promise.all([
       db.from("players").select("sleeper_id,name,team,pos,bye,status").in("sleeper_id", chunk),
       db
         .from("projections")
-        .select("sleeper_id,stats")
+        .select("sleeper_id,stats,opponent,updated_at")
         .eq("season", Number(state.season))
         .eq("week", week)
         .in("sleeper_id", chunk),
       db.from("values_fc").select("sleeper_id,value").eq("num_qbs", numQbs).eq("ppr", pprParam).in("sleeper_id", chunk),
+      db.from("injuries").select("sleeper_id,designation,detail,comment,comment_at").in("sleeper_id", chunk),
     ]);
     playerRows.push(...(p ?? []));
     projRows.push(...(pr ?? []));
     valueRows.push(...(vr ?? []));
+    injuryRows.push(...(ir ?? []));
   }
-  const projById = new Map(projRows.map((r) => [r.sleeper_id, r.stats]));
+  const projById = new Map(projRows.map((r) => [r.sleeper_id, r]));
   const fcById = new Map(valueRows.map((r) => [r.sleeper_id, r.value]));
+  const injById = new Map(injuryRows.map((r) => [r.sleeper_id, r]));
+  const injuriesAsOf = projRows.reduce<string | null>((m, r) => (!m || r.updated_at > m ? r.updated_at : m), null);
+  const now = Date.now();
 
   const playersById: Record<string, DashboardPlayer> = {};
   for (const p of playerRows) {
-    const stats = projById.get(p.sleeper_id);
+    const proj = projById.get(p.sleeper_id);
+    const stats = proj?.stats;
+    const inj = injById.get(p.sleeper_id);
+    // ESPN schedule is authoritative for byes; fall back to "projected with no opponent".
+    const game = p.team ? (schedule.get(p.team) ?? null) : null;
+    const onBye = !!p.team && (schedule.size ? !game : !!proj && !proj.opponent);
     playersById[p.sleeper_id] = {
       id: p.sleeper_id,
       name: p.name,
@@ -124,6 +162,12 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       bye: p.bye,
       proj: stats ? scoreProjection(stats, league.scoring_settings ?? {}) : null,
       value: fcById.get(p.sleeper_id) ?? null,
+      injuryDetail: p.status ? (inj?.detail ?? null) : null,
+      injuryComment: p.status ? (inj?.comment ?? null) : null,
+      injuryCommentAt: p.status ? (inj?.comment_at ?? null) : null,
+      game,
+      onBye,
+      locked: !!game && (game.state !== "pre" || new Date(game.kickoff).getTime() <= now),
     };
   }
 
@@ -190,11 +234,13 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       ownerId: r.owner_id,
       starters: r.starters ?? [],
       players: r.players ?? [],
+      reserve: r.reserve ?? [],
     })),
     matchups: matchups.map((m) => ({ matchupId: m.matchup_id, rosterId: m.roster_id, points: m.points ?? 0 })),
     playersById,
     waivers,
     news,
+    injuriesAsOf,
     degraded,
   } satisfies DashboardResponse);
 }

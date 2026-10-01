@@ -11,6 +11,8 @@ export type SleeperLeague = {
   roster_positions: string[];
   scoring_settings: Record<string, number>;
   draft_id: string | null;
+  /** waiver_type 2 = FAAB; playoff_week_start ends the regular season. */
+  settings?: { waiver_type?: number; waiver_budget?: number; playoff_week_start?: number } & Record<string, number | undefined>;
 };
 
 export type SleeperUser = {
@@ -64,6 +66,25 @@ export type SleeperRoster = {
   owner_id: string | null;
   players: string[] | null;
   starters: string[] | null;
+  reserve?: string[] | null;
+  taxi?: string[] | null;
+  settings?: { waiver_budget_used?: number; wins?: number; losses?: number } & Record<string, number | undefined>;
+};
+
+/** Row shape of Sleeper's projections/stats endpoints (player embedded). */
+export type SleeperStatRow = {
+  player_id: string;
+  stats: Record<string, number> | null;
+  opponent?: string | null;
+  team?: string | null;
+  player?: {
+    first_name?: string;
+    last_name?: string;
+    team?: string | null;
+    injury_status?: string | null;
+    injury_body_part?: string | null;
+    injury_notes?: string | null;
+  } | null;
 };
 
 export type SleeperMatchup = {
@@ -96,8 +117,14 @@ export const sleeper = {
     ),
   /** Unofficial weekly projections — same caveats as seasonProjections. */
   weekProjections: (season: string, week: number) =>
-    get<{ player_id: string; stats: Record<string, number> | null }[]>(
+    get<SleeperStatRow[]>(
       `/projections/nfl/${season}/${week}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=K&position[]=DEF&order_by=pts_ppr`,
+      "https://api.sleeper.com",
+    ),
+  /** Unofficial season-to-date actuals (~2 MB) — refresh a few times a day. */
+  seasonStats: (season: string) =>
+    get<SleeperStatRow[]>(
+      `/stats/nfl/${season}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=K&position[]=DEF`,
       "https://api.sleeper.com",
     ),
 };
@@ -171,6 +198,9 @@ export function injuryTag(injuryStatus: string | null | undefined): string | nul
       return "PUP";
     case "Sus":
       return "SUS";
+    case "NA":
+    case "DNR":
+      return "NA";
     default:
       return null;
   }

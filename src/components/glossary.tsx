@@ -37,9 +37,23 @@ const TERMS: { term: string; def: string }[] = [
   { term: "BYE", def: "The week that player's NFL team doesn't play." },
   {
     term: "Q / D / OUT / IR",
-    def: "Injury designations: Questionable, Doubtful, Out, Injured Reserve.",
+    def: "Injury designations: Questionable, Doubtful, Out, Injured Reserve (also PUP, SUS = suspended, NA = not with team). Start/sit counts Q at 80% of the projection and D at 20% — how often players with those tags actually suit up.",
   },
-  { term: "NEED", def: "A starting slot on your roster that's still empty." },
+  {
+    term: "NEED",
+    def: "Draft: a starting slot that's still empty. In season: a position where your starters rank in the league's bottom third, or 3+ pts/game below the league average.",
+  },
+  { term: "STRENGTH / SURPLUS", def: "STRENGTH: your starters at that position rank in the top third. SURPLUS: benched players there who'd be an average starter in your league — your trade currency." },
+  {
+    term: "RATE (/g)",
+    def: "Expected points per game in your scoring: season-to-date actuals blended with 4 games of preseason projection, averaged with this week's projection when healthy.",
+  },
+  {
+    term: "▲2.8/g",
+    def: "Lineup gain: how much your best possible lineup's points per game changes after an add or trade, re-solved with every flex slot.",
+  },
+  { term: "MAX OFFER", def: "Walk-away price for a trade target: 115% of their FantasyCalc market value. In 2-for-1s the second player counts 60%." },
+  { term: "EXPECTED PTS", def: "This week's projection × chance to play (Q 80%, D 20%, OUT/IR/bye 0). Start/sit maximizes this." },
   { term: "SNIPED", def: "A player in your queue that someone else drafted." },
   { term: "SFLX", def: "Superflex slot — a flex that can also start a QB." },
   { term: "FAAB", def: "Free-agent acquisition budget — dollars you bid on waiver players." },

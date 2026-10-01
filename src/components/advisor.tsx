@@ -18,18 +18,28 @@ import type { TradeEvaluation } from "@/app/api/league/[id]/trade/route";
 
 type AdvisorResponse = { advice: AdvisorAdvice; myPlayers: AdvisorPlayer[]; cached?: boolean };
 
+export type TradePreset = {
+  teamB: number;
+  sends: Record<number, { playerId: string; toRosterId: number }[]>;
+};
+
 export function AdvisorTab({
   leagueId,
   data,
   myRosterId,
   isMobile,
+  preset,
 }: {
   leagueId: string;
   data: DashboardResponse;
   myRosterId: number | null;
   isMobile: boolean;
+  /** Prefill from a trade-target idea (parent remounts with a new key). */
+  preset?: TradePreset | null;
 }) {
-  const [wanted, setWanted] = React.useState(false);
+  const qc = useQueryClient();
+  // Survives the remount a trade-target preset triggers.
+  const [wanted, setWanted] = React.useState(() => !!qc.getQueryData(["advisor", leagueId, myRosterId]));
   const advisor = useQuery({
     queryKey: ["advisor", leagueId, myRosterId],
     queryFn: async () => {
@@ -51,9 +61,13 @@ export function AdvisorTab({
 
   // ── Trade builder state ────────────────────────────────────────────────
   const otherRosters = data.rosters.filter((r) => r.rosterId !== myRosterId);
-  const [teamB, setTeamB] = React.useState<number | null>(null);
+  const [teamB, setTeamB] = React.useState<number | null>(preset?.teamB ?? null);
   const [teamC, setTeamC] = React.useState<number | null>(null);
-  const [sends, setSends] = React.useState<Record<number, { playerId: string; toRosterId: number }[]>>({});
+  const [sends, setSends] = React.useState<Record<number, { playerId: string; toRosterId: number }[]>>(preset?.sends ?? {});
+  const builderRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (preset) builderRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [preset]);
   const involved = [myRosterId, teamB, teamC].filter((x): x is number => x != null);
 
   const toggleSend = (fromRoster: number, playerId: string) => {
@@ -257,7 +271,7 @@ export function AdvisorTab({
       </Card>
 
       <Card title="Trade builder — 2 or 3 teams">
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div ref={builderRef} style={{ display: "flex", flexDirection: "column", gap: 12, scrollMarginTop: 80 }}>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <Select
               label="Trade with"
@@ -370,6 +384,7 @@ export function AdvisorTab({
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     <b>{t.teamName}</b>
                     <StatDelta value={t.valueDelta} label="value" />
+                    {t.lineupDelta != null && <StatDelta value={t.lineupDelta} suffix="/g" label="lineup" />}
                   </div>
                   <div style={{ color: "var(--text-faint)", fontSize: 12, marginTop: 2 }}>
                     gives {t.gives.join(", ") || "—"} · receives {t.receives.join(", ") || "—"}

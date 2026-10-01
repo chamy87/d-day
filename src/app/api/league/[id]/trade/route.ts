@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { sleeper } from "@/lib/sleeper";
 import { activeProvider, aiReason } from "@/lib/ai";
+import { loadRatings } from "@/lib/ratings";
+import { lineupRate } from "@/lib/roster-needs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -19,6 +21,10 @@ export type TradeEvaluation = {
     valueOut: number;
     valueIn: number;
     valueDelta: number;
+    /** Best-lineup expected pts/game before → after (simulated). */
+    lineupBefore: number;
+    lineupAfter: number;
+    lineupDelta: number;
     benefit: string;
     concerns: string;
   }[];
@@ -109,6 +115,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     return u?.metadata?.team_name ?? u?.display_name ?? `Team ${rosterId}`;
   };
 
+  // Objective lineup impact: re-solve each side's best lineup with the trade applied.
+  const week = Math.min(18, Math.max(1, state.week || 1));
+  const { byId: rated } = await loadRatings(db, league, state.season, week, new Set(rosters.flatMap((r) => r.players ?? [])));
+
   // Deterministic value math per team.
   const math = involved.map((t) => {
     const gives = t.sends.map((s) => s.playerId);
@@ -118,7 +128,22 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       .map((s) => s.playerId);
     const valueOut = gives.reduce((n, pid) => n + valueOf(pid), 0);
     const valueIn = receives.reduce((n, pid) => n + valueOf(pid), 0);
-    return { rosterId: t.rosterId, teamName: teamNameOf(t.rosterId), gives, receives, valueOut, valueIn, valueDelta: valueIn - valueOut };
+    const before = t.roster.players ?? [];
+    const after = [...before.filter((pid) => !gives.includes(pid)), ...receives];
+    const lineupBefore = lineupRate(league.roster_positions, before, rated);
+    const lineupAfter = lineupRate(league.roster_positions, after, rated);
+    return {
+      rosterId: t.rosterId,
+      teamName: teamNameOf(t.rosterId),
+      gives,
+      receives,
+      valueOut,
+      valueIn,
+      valueDelta: valueIn - valueOut,
+      lineupBefore,
+      lineupAfter,
+      lineupDelta: Math.round((lineupAfter - lineupBefore) * 10) / 10,
+    };
   });
 
   const teamBlocks = involved
@@ -128,11 +153,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   full roster: ${(t.roster.players ?? []).map((pid) => `${pById.get(pid)?.pos ?? "?"} ${nameOf(pid)}`).join(", ")}
   GIVES: ${m.gives.map(describe).join(" | ") || "(nothing)"}
   RECEIVES: ${m.receives.map(describe).join(" | ") || "(nothing)"}
-  value out ${m.valueOut}, value in ${m.valueIn}, net ${m.valueDelta >= 0 ? "+" : ""}${m.valueDelta}`;
+  value out ${m.valueOut}, value in ${m.valueIn}, net ${m.valueDelta >= 0 ? "+" : ""}${m.valueDelta}
+  best-lineup expected pts/game: ${m.lineupBefore} → ${m.lineupAfter} (${m.lineupDelta >= 0 ? "+" : ""}${m.lineupDelta})`;
     })
     .join("\n\n");
 
-  const system = `You are D-Day, a terse tactical fantasy football trade analyst. Voice: second person toward the proposing team, numbers lead, no hype, no emoji. Judge trades on roster fit and positional needs, market value and 30-day trend, age curves (RB ~27+, WR ~30+), tiers, bye overlap, and injury risk — not raw value alone. Be reasonable: a trade where one side clearly loses is unrealistic and you must say so. The first team listed is the user proposing the trade; look out for their interest but keep the pitch honest and mutually defensible. Output ONLY JSON: {"teams":[{"rosterId":n,"benefit":"...","concerns":"..."}],"realistic":true|false,"fairness":"balanced"|"slightly favors <team>"|"lopsided toward <team>","angle":"how to pitch it to the other side(s), one or two sentences","summary":"one sentence verdict"} — each benefit/concern is one clause under 160 chars.`;
+  const system = `You are D-Day, a terse tactical fantasy football trade analyst. Voice: second person toward the proposing team, numbers lead, no hype, no emoji. Judge trades first on the simulated best-lineup pts/game change for each side (objective, already computed — cite it), then roster fit and positional needs, market value and 30-day trend, age curves (RB ~27+, WR ~30+), tiers, bye overlap, and injury risk — not raw value alone. Be reasonable: a trade where one side clearly loses is unrealistic and you must say so. The first team listed is the user proposing the trade; look out for their interest but keep the pitch honest and mutually defensible. Output ONLY JSON: {"teams":[{"rosterId":n,"benefit":"...","concerns":"..."}],"realistic":true|false,"fairness":"balanced"|"slightly favors <team>"|"lopsided toward <team>","angle":"how to pitch it to the other side(s), one or two sentences","summary":"one sentence verdict"} — each benefit/concern is one clause under 160 chars.`;
 
   const prompt = `${league.season} season, week ${state.week}. Scoring rec=${rec}, ${numQbs}QB league.
 

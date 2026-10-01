@@ -2,7 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Tag } from "@/components/ui/tag";
 import { Tabs } from "@/components/ui/tabs";
@@ -10,11 +10,12 @@ import { Select } from "@/components/ui/select";
 import { Toast } from "@/components/ui/toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PositionBadge, type Position } from "@/components/ui/position-badge";
-import { StatDelta } from "@/components/ui/stat-delta";
 import { Wordmark } from "@/components/wordmark";
 import { useIsMobile } from "@/lib/use-mobile";
 import { loadTeamPref, saveTeamPref } from "@/lib/session-client";
-import { AdvisorTab } from "@/components/advisor";
+import { AdvisorTab, type TradePreset } from "@/components/advisor";
+import { StartSit } from "@/components/start-sit";
+import { useNeeds, RosterBalance, WaiverIdeas, TradeIdeas, NeedsLoading } from "@/components/roster-needs";
 import { TeamPickerModal, TeamChip } from "@/components/team-picker-modal";
 import { GlossaryButton } from "@/components/glossary";
 import { AccountButton } from "@/components/account";
@@ -24,7 +25,7 @@ import { useRouter } from "next/navigation";
 import type { DashboardResponse, DashboardPlayer } from "@/app/api/league/[id]/dashboard/route";
 import type { Insight } from "@/app/api/league/[id]/insights/route";
 
-const TABS = ["START/SIT", "MATCHUP", "WAIVERS", "ADVISOR", "NEWS"];
+const TABS = ["START/SIT", "MATCHUP", "WAIVERS", "TRADES", "NEWS"];
 
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
@@ -98,11 +99,19 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
     setPickerOpen(false);
   };
 
+  const queryClient = useQueryClient();
   const dash = useQuery({
     queryKey: ["dashboard", leagueId, week],
     queryFn: () => getJson<DashboardResponse>(`/api/league/${leagueId}/dashboard${week ? `?week=${week}` : ""}`),
     staleTime: 60 * 1000,
   });
+  // On-demand injury check: server accepts ≤5-min-old designations instead of 1h.
+  const freshCheck = useMutation({
+    mutationFn: () =>
+      getJson<DashboardResponse>(`/api/league/${leagueId}/dashboard?fresh=1${week ? `&week=${week}` : ""}`),
+    onSuccess: (d) => queryClient.setQueryData(["dashboard", leagueId, week], d),
+  });
+  const [tradePreset, setTradePreset] = React.useState<{ key: number; preset: TradePreset } | null>(null);
 
   const data = dash.data;
   const myRoster = data?.rosters.find((r) => r.ownerId === myUserId) ?? null;
@@ -119,6 +128,8 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
     },
     staleTime: 10 * 60 * 1000,
   });
+
+  const needs = useNeeds(leagueId, myRoster?.rosterId ?? null, tab === "WAIVERS" || tab === "TRADES");
 
   const insights = useQuery({
     queryKey: ["insights", leagueId, data?.week, myRoster?.rosterId],
@@ -159,20 +170,6 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
   const player = (pid: string): DashboardPlayer =>
     data.playersById[pid] ?? { id: pid, name: pid, team: null, pos: "BN", injury: null, bye: null, proj: null };
 
-  const myStarters = (myRoster?.starters ?? []).filter((s) => s && s !== "0").map(player);
-  const myBench = (myRoster?.players ?? [])
-    .filter((pid) => !(myRoster?.starters ?? []).includes(pid))
-    .map(player)
-    .sort((a, b) => (b.proj ?? 0) - (a.proj ?? 0));
-
-  // Deterministic bench-over-starter flags (same position, ≥1 pt edge).
-  const benchFlags = myStarters.flatMap((s) => {
-    const better = myBench.find((b) => b.pos === s.pos && (b.proj ?? 0) > (s.proj ?? 0) + 1);
-    return better
-      ? [{ starter: s, bench: better, edge: Math.round(((better.proj ?? 0) - (s.proj ?? 0)) * 10) / 10 }]
-      : [];
-  });
-
   const myMatchup = data.matchups.find((m) => m.rosterId === myRoster?.rosterId);
   const oppMatchup =
     myMatchup?.matchupId != null
@@ -181,23 +178,6 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
   const oppRoster = data.rosters.find((r) => r.rosterId === oppMatchup?.rosterId);
   const projTotal = (starters: string[] | undefined) =>
     Math.round((starters ?? []).filter((s) => s && s !== "0").reduce((sum, pid) => sum + (player(pid).proj ?? 0), 0) * 10) / 10;
-
-  const benchCard =
-    myBench.length > 0 ? (
-      <Card title="Bench" pad={false}>
-        {myBench.map((p, i) => (
-          <PlayerLine
-            key={`${p.id}-${i}`}
-            p={p}
-            right={
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--text-muted)" }}>
-                {p.proj != null ? p.proj.toFixed(1) : "—"}
-              </span>
-            }
-          />
-        ))}
-      </Card>
-    ) : null;
 
   // News relevance: player-id match when the item carries ingest-time tags;
   // full-name match only as fallback (surname-only matching misfires).
@@ -304,59 +284,38 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
         )}
 
         {tab === "START/SIT" && (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: isMobile ? "1fr" : "1fr 320px",
-              gap: 14,
-              alignItems: "start",
-            }}
-          >
-            <div style={{ display: "flex", flexDirection: "column", gap: 14, order: isMobile ? 0 : undefined }}>
-              <Card title={`Your starters — projected (${data.league.scoring})`} pad={false}>
-                {myStarters.length ? (
-                  myStarters.map((p, i) => (
-                    <PlayerLine
-                      key={`${p.id}-${i}`}
-                      p={p}
-                      right={
-                        <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 14 }}>
-                          {p.proj != null ? p.proj.toFixed(1) : "—"}
-                        </span>
-                      }
-                    />
-                  ))
-                ) : (
-                  <div style={{ padding: 16, fontSize: 13, color: "var(--text-faint)" }}>
-                    {myRoster ? "No starters set for this week." : "Pick your team to see starters."}
+          <StartSit
+            data={data}
+            roster={myRoster}
+            isMobile={isMobile}
+            refreshing={freshCheck.isPending}
+            onRefresh={() => freshCheck.mutate()}
+            aiFlags={
+              <>
+                {(insights.isFetching || (insights.data?.insights ?? []).length > 0) && (
+                  <div
+                    style={{
+                      borderTop: "1px solid var(--line-1)",
+                      paddingTop: 8,
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 9,
+                      letterSpacing: ".08em",
+                      color: "var(--text-faint)",
+                    }}
+                  >
+                    AI READ — PRACTICE REPORTS &amp; CONTEXT
                   </div>
                 )}
-              </Card>
-              {!isMobile && benchCard}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <Card title="Flags">
-                <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 13, color: "var(--text-muted)" }}>
-                  {benchFlags.map((f, i) => (
-                    <div key={i}>
-                      <Tag tone="reach">RISK</Tag>{" "}
-                      <b style={{ color: "var(--text-body)" }}>{f.bench.name}</b> projects{" "}
-                      <StatDelta value={f.edge} /> over your starting {f.starter.pos} {f.starter.name}.
-                    </div>
-                  ))}
-                  {insights.isFetching && <Skeleton height={40} />}
-                  {(insights.data?.insights ?? []).map((ins, i) => (
-                    <div key={`ai-${i}`}>
-                      <Tag tone={ins.tone}>{ins.tag}</Tag> {ins.text}
-                    </div>
-                  ))}
-                  {!benchFlags.length && !insights.isFetching && !(insights.data?.insights ?? []).length && (
-                    <span style={{ color: "var(--text-faint)" }}>
-                      {myRoster ? "No flags — lineup looks set." : "Pick your team to get flags."}
-                    </span>
-                  )}
-                </div>
-              </Card>
+                {insights.isFetching && <Skeleton height={40} />}
+                {(insights.data?.insights ?? []).map((ins, i) => (
+                  <div key={`ai-${i}`}>
+                    <Tag tone={ins.tone}>{ins.tag}</Tag> {ins.text}
+                  </div>
+                ))}
+              </>
+            }
+            side={
+              <>
               {recap.data && (
                 <Card title={`Draft recap${(recap.data.payload as { season?: string }).season ? ` · ${(recap.data.payload as { season?: string }).season}` : ""}`}>
                   {(() => {
@@ -404,9 +363,9 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
                   })()}
                 </Card>
               )}
-              {isMobile && benchCard}
-            </div>
-          </div>
+              </>
+            }
+          />
         )}
 
         {tab === "MATCHUP" && (
@@ -458,7 +417,21 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
         )}
 
         {tab === "WAIVERS" && (
-          <Card title="Waiver targets — trending ∩ unrostered" pad={false} style={{ maxWidth: 640 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 380px", gap: 14, alignItems: "start" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {!myRoster ? null : needs.isLoading ? (
+                <NeedsLoading />
+              ) : needs.isError ? (
+                <Toast tone="reach" title="Roster analysis unavailable">
+                  {needs.error instanceof Error ? needs.error.message : "Try again shortly."}
+                </Toast>
+              ) : needs.data ? (
+                <WaiverIdeas needs={needs.data} />
+              ) : null}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {needs.data && <RosterBalance needs={needs.data} />}
+          <Card title="Trending adds — unrostered" pad={false}>
             {data.waivers.map((w) => {
               const p = player(w.id);
               return (
@@ -487,10 +460,51 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
               </div>
             )}
           </Card>
+            </div>
+          </div>
         )}
 
-        {tab === "ADVISOR" && (
-          <AdvisorTab leagueId={leagueId} data={data} myRosterId={myRoster?.rosterId ?? null} isMobile={isMobile} />
+        {tab === "TRADES" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {myRoster && (
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 14, alignItems: "start" }}>
+                {needs.isLoading ? (
+                  <NeedsLoading />
+                ) : needs.isError ? (
+                  <Toast tone="reach" title="Roster analysis unavailable">
+                    {needs.error instanceof Error ? needs.error.message : "Try again shortly."}
+                  </Toast>
+                ) : needs.data ? (
+                  <>
+                    <TradeIdeas
+                      needs={needs.data}
+                      onLoad={(partner, myGives, theyGive) =>
+                        setTradePreset({
+                          key: Date.now(),
+                          preset: {
+                            teamB: partner,
+                            sends: {
+                              [myRoster.rosterId]: myGives.map((playerId) => ({ playerId, toRosterId: partner })),
+                              [partner]: [{ playerId: theyGive, toRosterId: myRoster.rosterId }],
+                            },
+                          },
+                        })
+                      }
+                    />
+                    <RosterBalance needs={needs.data} />
+                  </>
+                ) : null}
+              </div>
+            )}
+            <AdvisorTab
+              key={tradePreset?.key ?? 0}
+              leagueId={leagueId}
+              data={data}
+              myRosterId={myRoster?.rosterId ?? null}
+              isMobile={isMobile}
+              preset={tradePreset?.preset ?? null}
+            />
+          </div>
         )}
 
         {tab === "NEWS" && (
