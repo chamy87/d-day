@@ -7,6 +7,7 @@ import { ensurePlayers, ensureWeekProjections, ensureValues, ensureInjuryComment
 import { relevantNews } from "@/lib/news";
 import type { NewsItem } from "@/lib/news";
 import { weekSchedule, type TeamGame } from "@/lib/schedule";
+import { injuryOutlook, type Outlook } from "@/lib/injury-outlook";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -30,6 +31,9 @@ export type DashboardPlayer = {
   onBye?: boolean;
   /** Game kicked off — lineup slot is locked on Sleeper. */
   locked?: boolean;
+  /** SEASON / LONG = not expected back this year (reason quotes the source). */
+  outlook?: Outlook;
+  outlookReason?: string | null;
 };
 
 export type DashboardResponse = {
@@ -145,6 +149,24 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   const injById = new Map(injuryRows.map((r) => [r.sleeper_id, r]));
   const injuriesAsOf = projRows.reduce<string | null>((m, r) => (!m || r.updated_at > m ? r.updated_at : m), null);
   const now = Date.now();
+  // Injury outlook needs headlines, not just the designation ("IR" can be 4 weeks or a torn ACL).
+  const flagged = playerRows.filter((p) => p.status && rostered.has(p.sleeper_id)).map((p) => p.sleeper_id);
+  const titlesById = new Map<string, string[]>();
+  if (flagged.length) {
+    const { data: inj45 } = await db
+      .from("news_cache")
+      .select("title,player_ids")
+      .overlaps("player_ids", flagged)
+      .gte("published_at", new Date(now - 45 * 86400000).toISOString())
+      .order("published_at", { ascending: false })
+      .limit(300);
+    for (const n of inj45 ?? []) {
+      for (const pid of n.player_ids ?? []) {
+        if (!flagged.includes(pid)) continue;
+        titlesById.set(pid, [...(titlesById.get(pid) ?? []), n.title].slice(0, 12));
+      }
+    }
+  }
 
   const playersById: Record<string, DashboardPlayer> = {};
   for (const p of playerRows) {
@@ -154,6 +176,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     // ESPN schedule is authoritative for byes; fall back to "projected with no opponent".
     const game = p.team ? (schedule.get(p.team) ?? null) : null;
     const onBye = !!p.team && (schedule.size ? !game : !!proj && !proj.opponent);
+    const outlook = p.status
+      ? injuryOutlook({ designation: p.status, name: p.name, detail: inj?.detail, comment: inj?.comment, headlines: titlesById.get(p.sleeper_id) })
+      : null;
     playersById[p.sleeper_id] = {
       id: p.sleeper_id,
       name: p.name,
@@ -169,6 +194,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       game,
       onBye,
       locked: !!game && (game.state !== "pre" || new Date(game.kickoff).getTime() <= now),
+      outlook: outlook?.outlook,
+      outlookReason: outlook?.reason ?? null,
     };
   }
 

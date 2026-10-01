@@ -218,7 +218,7 @@ export function AdvisorTab({
   }
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 14, alignItems: "start" }}>
+    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "minmax(0, 1fr)" : "minmax(0, 1fr) minmax(0, 1fr)", gap: 14, alignItems: "start" }}>
       <Card
         title="Sell high / buy low"
         action={

@@ -3,6 +3,7 @@ import type { SleeperLeague } from "./sleeper";
 import { scoreProjection } from "./vbd";
 import { ensurePlayers, ensureWeekProjections, ensureYtdStats, ensureValues, ensureProjections, fetchAll } from "./ingest";
 import { SKILL_POS, rateOf, ifBackRate, type RatedPlayer } from "./roster-needs";
+import { injuryOutlook } from "./injury-outlook";
 
 /**
  * Rate every rostered skill player (plus projected/producing free agents)
@@ -37,7 +38,7 @@ export async function loadRatings(
   ]);
 
   const y = Number(season);
-  const [players, weekProj, preProj, ytd, values, seasons, news] = await Promise.all([
+  const [players, weekProj, preProj, ytd, values, seasons, news, injuries] = await Promise.all([
     fetchAll<{ sleeper_id: string; name: string; team: string | null; pos: string; status: string | null }>((f, t) =>
       db.from("players").select("sleeper_id,name,team,pos,status").in("pos", [...SKILL_POS]).range(f, t),
     ),
@@ -65,11 +66,15 @@ export async function loadRatings(
       db
         .from("news_cache")
         .select("player_ids,title,published_at")
-        .gte("published_at", new Date(Date.now() - 14 * 86400000).toISOString())
+        .gte("published_at", new Date(Date.now() - 45 * 86400000).toISOString())
         .order("published_at", { ascending: false })
         .range(f, t),
     ).catch(() => []),
+    fetchAll<{ sleeper_id: string; designation: string | null; detail: string | null; comment: string | null }>((f, t) =>
+      db.from("injuries").select("sleeper_id,designation,detail,comment").not("designation", "is", null).range(f, t),
+    ).catch(() => []),
   ]);
+  const injById = new Map(injuries.map((r) => [r.sleeper_id, r]));
 
   // Historical seasons re-scored for this league's reception weight.
   const recW = scoring.rec ?? 0;
@@ -82,11 +87,19 @@ export async function loadRatings(
     list.push({ season: h.season, ppg: Math.round((pts / games) * 10) / 10, games });
     histById.set(h.sleeper_id, list);
   }
-  const newsById = new Map<string, { count: number; headline: string }>();
+  // count/headline = last 14 days (signal); titles = last 45 days (injury outlook).
+  const recent = Date.now() - 14 * 86400000;
+  const newsById = new Map<string, { count: number; headline: string | null; titles: string[] }>();
   for (const n of news) {
+    const isRecent = new Date(n.published_at).getTime() >= recent;
     for (const pid of n.player_ids ?? []) {
-      const cur = newsById.get(pid);
-      newsById.set(pid, { count: (cur?.count ?? 0) + 1, headline: cur?.headline ?? n.title });
+      const cur = newsById.get(pid) ?? { count: 0, headline: null, titles: [] };
+      if (isRecent) {
+        cur.count++;
+        cur.headline ??= n.title;
+      }
+      if (cur.titles.length < 12) cur.titles.push(n.title);
+      newsById.set(pid, cur);
     }
   }
 
@@ -107,6 +120,8 @@ export async function loadRatings(
     // or unsigned veterans with recent production and live signing signals.
     const comeback =
       !p.team && !!hist?.some((h) => h.season >= y - 2 && h.games >= 6) && ((nw?.count ?? 0) > 0 || (val?.trend30 ?? 0) > 0);
+    const inj = injById.get(p.sleeper_id);
+    const outlook = injuryOutlook({ designation: p.status, name: p.name, detail: inj?.detail, comment: inj?.comment, headlines: nw?.titles });
     if (!rostered.has(p.sleeper_id) && !w && !yt && !comeback) continue;
     const weekPts = w ? scoreProjection(w.stats, scoring) : null;
     const prePts = pre ? scoreProjection(pre, scoring) : null;
@@ -126,6 +141,9 @@ export async function loadRatings(
       hist,
       ifBack: !p.team || (p.status && ["IR", "PUP", "SUS", "NA"].includes(p.status)) ? ifBackRate(hist) : null,
       newsCount: nw?.count ?? 0,
+      injuryDetail: inj?.detail ?? null,
+      outlook: outlook.outlook,
+      outlookReason: outlook.reason,
       headline: nw?.headline ?? null,
       opp: w?.opponent ?? null,
       gp,

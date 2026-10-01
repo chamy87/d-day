@@ -54,6 +54,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     (c.mine.starters ?? []).join(","),
     needs.trades.map((t) => `${t.target}:${t.send.join("+")}`).join("|"),
     needs.stash.map((s) => s.id).join(","),
+    needs.seasonOut.map((s) => s.id).join(","),
   ].join("#");
   if (!url.searchParams.has("refresh")) {
     const { data: cached } = await db
@@ -106,7 +107,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
 
   const line = (p: RatedPlayer) => {
     const hist = (p.hist ?? []).map((h) => `${h.season}:${h.ppg}ppg/${h.games}g`).join(" ");
-    return `${p.pos} ${p.name} (${p.team ?? "NO TEAM"}${p.age ? `, age ${p.age}` : ""}) rate ${p.rate}/g${p.ytdPpg != null ? `, ${p.ytdPpg}ppg in ${p.gp}g this season` : ""}${p.injury ? ` [${p.injury}]` : ""}${p.value != null ? `, value ${p.value}` : ""}${p.trend30 ? ` (30d ${p.trend30 > 0 ? "+" : ""}${p.trend30})` : ""}${hist ? ` hist[${hist}]` : ""}`;
+    return `${p.pos} ${p.name} (${p.team ?? "NO TEAM"}${p.age ? `, age ${p.age}` : ""}) rate ${p.rate}/g${p.ytdPpg != null ? `, ${p.ytdPpg}ppg in ${p.gp}g this season` : ""}${p.injury ? ` [${p.injury}${p.injuryDetail ? `: ${p.injuryDetail}` : ""}]` : ""}${p.outlook === "SEASON" || p.outlook === "LONG" ? ` [OUT FOR SEASON${p.outlook === "LONG" ? " (presumed)" : ""}${p.outlookReason ? ` — "${p.outlookReason}"` : ""}]` : ""}${p.value != null ? `, value ${p.value}` : ""}${p.trend30 ? ` (30d ${p.trend30 > 0 ? "+" : ""}${p.trend30})` : ""}${hist ? ` hist[${hist}]` : ""}`;
   };
 
   const balance = needs.strength
@@ -157,7 +158,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     .limit(20);
   const newsBlock = (newsRows ?? []).map((n) => `- ${n.title} (${n.source})`).join("\n") || "(none)";
 
-  const system = `You are D-Day, a terse tactical fantasy football co-manager. Voice: second person, numbers lead, no hype, no emoji. All numbers below come from a deterministic engine (exact lineup optimizer, league-scored rates, FantasyCalc market values) — cite them, never invent or contradict them. Rate = expected pts/game. For trades, "case" is the objective reason it helps the user; "pitch" is the angle for the message the user sends the OTHER manager — written from that manager's interest (their simulated gain, their positional need, the value they receive), honest and specific, 1-2 sentences, ready to paste. For stashes, weigh track record (hist), age, news, and market trend; say plainly whether to hold/add and why. Output ONLY JSON: {"headline":"the single most important thing this week, <160 chars","lineup":"1-2 sentences","trades":[{"target":"<target id from IDEA target=>","case":"<200 chars","pitch":"<280 chars"}],"stash":[{"id":"<id from STASH id=>","note":"<200 chars"}],"waivers":"1-2 sentences","watch":"what to monitor before kickoff/waivers, 1 sentence"}`;
+  const system = `You are D-Day, a terse tactical fantasy football co-manager. Voice: second person, numbers lead, no hype, no emoji. All numbers below come from a deterministic engine (exact lineup optimizer, league-scored rates, FantasyCalc market values) — cite them, never invent or contradict them. Rate = expected pts/game. For trades, "case" is the objective reason it helps the user; "pitch" is the angle for the message the user sends the OTHER manager — written from that manager's interest (their simulated gain, their positional need, the value they receive), honest and specific, 1-2 sentences, ready to paste. A player marked OUT FOR SEASON will not play again this year: never suggest adding, stashing, or trading for him; if he's on the user's bench, call it a dead roster spot to cut; in an IR slot he costs nothing. For stashes, weigh track record (hist), age, news, and market trend; say plainly whether to hold/add and why. Output ONLY JSON: {"headline":"the single most important thing this week, <160 chars","lineup":"1-2 sentences","trades":[{"target":"<target id from IDEA target=>","case":"<200 chars","pitch":"<280 chars"}],"stash":[{"id":"<id from STASH id=>","note":"<200 chars"}],"waivers":"1-2 sentences","watch":"what to monitor before kickoff/waivers, 1 sentence"}`;
 
   const prompt = `${c.league.season} week ${needs.week}, ${needs.weeksLeft} weeks left. Scoring rec=${c.league.scoring_settings?.rec ?? 0}. FAAB: ${needs.faab ? `$${needs.faab.remaining}/${needs.faab.budget}` : "rolling waivers"}. IR slots ${needs.irSlots.used}/${needs.irSlots.total}; IR moves: ${irBlock}.
 
@@ -178,6 +179,8 @@ ${stashBlock || "(none)"}
 
 WAIVERS:
 ${waiverBlock}
+
+OUT FOR THE SEASON ON MY ROSTER: ${needs.seasonOut.map((x) => `${name(x.id)} (${x.where === "ir" ? "IR slot" : "BENCH — dead spot"})`).join(", ") || "none"}
 
 RECENT NEWS:
 ${newsBlock}`;

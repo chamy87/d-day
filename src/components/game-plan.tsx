@@ -172,10 +172,10 @@ export function GamePlanTab({
 
   const n = needs.data;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
       {headline}
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 14, alignItems: "start" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "minmax(0, 1fr)" : "minmax(0, 1fr) minmax(0, 1fr)", gap: 14, alignItems: "start" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
           {thisWeek}
           {needs.isLoading ? (
             <NeedsLoading />
@@ -189,7 +189,7 @@ export function GamePlanTab({
             />
           ) : null}
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
           {n && <RosterBalance needs={n} />}
           {n && <StashCard needs={n} notes={ai.data?.plan.stash} />}
           {n && <WaiverIdeas needs={n} />}

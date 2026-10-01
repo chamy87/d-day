@@ -34,6 +34,7 @@ export function Card({ title, action, pad = true, glow, fill, children, style }:
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
+            flexWrap: "wrap",
             gap: 8,
             padding: "10px 16px",
             borderBottom: "1px solid var(--line-1)",

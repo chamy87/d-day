@@ -348,9 +348,9 @@ export function StashCard({
   notes?: GamePlanResponse["plan"]["stash"];
 }) {
   const P = needs.players;
-  if (!needs.stash.length) return null;
+  if (!needs.stash.length && !needs.seasonOut.length) return null;
   return (
-    <Card title="Stashes — buy before the market does" pad={false}>
+    <Card title="Stashes & season-ending injuries" pad={false}>
       {needs.stash.map((s) => {
         const p = P[s.id];
         if (!p) return null;
@@ -392,8 +392,32 @@ export function StashCard({
           </div>
         );
       })}
+      {needs.seasonOut.map((x) => {
+        const p = P[x.id];
+        if (!p) return null;
+        return (
+          <div key={x.id} style={{ padding: "9px 12px", borderBottom: "1px solid var(--line-1)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <Tag tone="reach">{x.outlook === "SEASON" ? "OUT FOR SEASON" : "LIKELY OUT FOR SEASON"}</Tag>
+              <PositionBadge pos={p.pos as Position} size="sm" />
+              <b style={{ fontSize: 14 }}>{p.name}</b>
+              <span style={{ fontSize: 11, color: "var(--text-faint)" }}>
+                {p.injuryDetail ?? p.injury}
+                {x.where === "ir" ? " · in your IR slot" : " · on your bench"}
+              </span>
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+              {x.where === "ir"
+                ? "Free to hold in the IR slot — no upside this year. Cut only if you need the slot for a returning stash."
+                : "Dead roster spot — cut for a free agent who can play."}
+              {x.reason && <span style={{ color: "var(--text-faint)" }}> Source: “{x.reason}”</span>}
+            </div>
+          </div>
+        );
+      })}
       <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-faint)" }}>
-        Sidelined (unsigned or IR/PUP/SUS) players whose return would lift your lineup ≥1 pt/g. Holds are never suggested as
+        Players flagged out for the season (explicit &quot;season-ending&quot;/&quot;torn ACL&quot; in the injury line, ESPN report or
+        headlines, or an ACL/Achilles on IR) are never suggested as stashes or trade pieces. Sidelined (unsigned or IR/PUP/SUS) players whose return would lift your lineup ≥1 pt/g. Holds are never suggested as
         cuts. Free-agent stashes need a live signal: recent headlines or a rising market value.
       </div>
     </Card>

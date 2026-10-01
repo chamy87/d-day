@@ -210,35 +210,48 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: "100dvh" }}>
-      <header
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 14,
-          padding: "10px 16px",
-          borderBottom: "1px solid var(--line-1)",
-          background: "var(--surface-panel)",
-          flexWrap: "wrap",
-        }}
-      >
-        <Link href="/" title="Home — look up another league" style={{ textDecoration: "none", color: "inherit" }}>
-          <Wordmark size={20} />
-        </Link>
-        <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
-          {data.league.name} · Week {data.week}
-        </span>
-        <Tag>{data.league.scoring}</Tag>
-        <span style={{ flex: 1 }} />
-        <Tabs items={TABS} value={tab} onChange={setTab} size="sm" />
-        {data.league.draftId && (
-          <Tabs
-            size="sm"
-            items={["BOARD", "DASHBOARD"]}
-            value="DASHBOARD"
-            onChange={(v) => v === "BOARD" && router.push(`/league/${leagueId}/draft`)}
-          />
-        )}
-        {myTeamLabel ? (
+      {isMobile ? (
+        // Mobile: identity + actions on one line, tabs full-width and swipeable below.
+        <header
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            padding: "8px 12px",
+            borderBottom: "1px solid var(--line-1)",
+            background: "var(--surface-panel)",
+            position: "sticky",
+            top: 0,
+            zIndex: 20,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+            <Link href="/" title="Home — look up another league" style={{ textDecoration: "none", color: "inherit", flexShrink: 0 }}>
+              <Wordmark size={18} />
+            </Link>
+            <span
+              style={{
+                fontSize: 12,
+                color: "var(--text-muted)",
+                flex: 1,
+                minWidth: 0,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {data.league.name} · Wk {data.week} · {data.league.scoring}
+            </span>
+            {data.league.draftId && (
+              <Link
+                href={`/league/${leagueId}/draft`}
+                style={{ fontSize: 11, color: "var(--text-muted)", textDecoration: "none", flexShrink: 0 }}
+              >
+                Board
+              </Link>
+            )}
+            <span style={{ flexShrink: 0, maxWidth: 120, overflow: "hidden" }}>
+              {myTeamLabel ? (
           <TeamChip label={myTeamLabel} onClick={() => setPickerOpen(true)} />
         ) : (
           <button
@@ -252,14 +265,70 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
               color: "var(--text-muted)",
               fontSize: 11,
               fontFamily: "var(--font-body)",
+              whiteSpace: "nowrap",
             }}
           >
             Pick team
           </button>
         )}
-        <GlossaryButton />
-        <AccountButton leagueId={leagueId} />
-      </header>
+            </span>
+            <GlossaryButton />
+            <AccountButton leagueId={leagueId} />
+          </div>
+          <Tabs items={TABS} value={tab} onChange={setTab} size="sm" style={{ display: "flex", width: "100%" }} />
+        </header>
+      ) : (
+      <header
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            padding: "10px 16px",
+            borderBottom: "1px solid var(--line-1)",
+            background: "var(--surface-panel)",
+            flexWrap: "wrap",
+          }}
+        >
+          <Link href="/" title="Home — look up another league" style={{ textDecoration: "none", color: "inherit" }}>
+            <Wordmark size={20} />
+          </Link>
+          <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+            {data.league.name} · Week {data.week}
+          </span>
+          <Tag>{data.league.scoring}</Tag>
+          <span style={{ flex: 1 }} />
+          <Tabs items={TABS} value={tab} onChange={setTab} size="sm" />
+          {data.league.draftId && (
+            <Tabs
+              size="sm"
+              items={["BOARD", "DASHBOARD"]}
+              value="DASHBOARD"
+              onChange={(v) => v === "BOARD" && router.push(`/league/${leagueId}/draft`)}
+            />
+          )}
+          {myTeamLabel ? (
+            <TeamChip label={myTeamLabel} onClick={() => setPickerOpen(true)} />
+          ) : (
+            <button
+              onClick={() => setPickerOpen(true)}
+              style={{
+                background: "transparent",
+                border: "1px solid var(--line-2)",
+                borderRadius: "var(--radius-pill)",
+                padding: "4px 12px",
+                cursor: "pointer",
+                color: "var(--text-muted)",
+                fontSize: 11,
+                fontFamily: "var(--font-body)",
+              }}
+            >
+              Pick team
+            </button>
+          )}
+          <GlossaryButton />
+          <AccountButton leagueId={leagueId} />
+        </header>
+      )}
 
       {(pickerOpen || (prefsLoaded && !myUserId && !pickerDismissed && data.users.length > 0)) && (
         <TeamPickerModal
@@ -275,7 +344,7 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
         />
       )}
 
-      <div style={{ padding: 14, flex: 1 }}>
+      <div style={{ padding: isMobile ? 10 : 14, flex: 1, minWidth: 0 }}>
         {(tab === "START/SIT" || tab === "MATCHUP") && (
           <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
             <Select
@@ -401,7 +470,7 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+              gridTemplateColumns: isMobile ? "minmax(0, 1fr)" : "minmax(0, 1fr) minmax(0, 1fr)",
               gap: 14,
               alignItems: "start",
               maxWidth: 900,
@@ -446,8 +515,8 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
         )}
 
         {tab === "WAIVERS" && (
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 380px", gap: 14, alignItems: "start" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "minmax(0, 1fr)" : "minmax(0, 1fr) 380px", gap: 14, alignItems: "start" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
               {!myRoster ? null : needs.isLoading ? (
                 <NeedsLoading />
               ) : needs.isError ? (
@@ -461,7 +530,7 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
                 </>
               ) : null}
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
               {needs.data && <RosterBalance needs={needs.data} />}
           <Card title="Trending adds — unrostered" pad={false}>
             {data.waivers.map((w) => {
@@ -497,9 +566,9 @@ export function Dashboard({ leagueId }: { leagueId: string }) {
         )}
 
         {tab === "TRADES" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
             {myRoster && (
-              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 14, alignItems: "start" }}>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "minmax(0, 1fr)" : "minmax(0, 1fr) minmax(0, 1fr)", gap: 14, alignItems: "start" }}>
                 {needs.isLoading ? (
                   <NeedsLoading />
                 ) : needs.isError ? (

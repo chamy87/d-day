@@ -7,6 +7,7 @@ import {
   waiverIdeas,
   tradeIdeas,
   stashIdeas,
+  seasonDone,
   type RatedPlayer,
   type PositionStrength,
   type WaiverIdea,
@@ -26,6 +27,8 @@ export type NeedsResponse = {
   /** IR-slot housekeeping (activate / move to IR / IR full). */
   ir: IrMove[];
   irSlots: { used: number; total: number };
+  /** Your players not expected back this season — IR slot = free to hold; bench = dead spot. */
+  seasonOut: { id: string; where: "bench" | "ir"; outlook: "SEASON" | "LONG"; reason: string | null }[];
   players: Record<string, RatedPlayer>;
   /** When the inputs were last refreshed upstream. */
   asOf: { projections: string | null; stats: string | null };
@@ -125,6 +128,16 @@ export async function computeNeeds(
   const rules = reserveRules(league);
   const ir = irMoves(mine.players ?? [], reserve, (id) => byId.get(id)?.injury, rules);
 
+  const seasonOut = (mine.players ?? [])
+    .map((pid) => byId.get(pid))
+    .filter((p): p is RatedPlayer => !!p && seasonDone(p))
+    .map((p) => ({
+      id: p.id,
+      where: (reserve.includes(p.id) ? "ir" : "bench") as "ir" | "bench",
+      outlook: p.outlook as "SEASON" | "LONG",
+      reason: p.outlookReason ?? null,
+    }));
+
   const referenced = new Set<string>([
     ...myTeam.players,
     ...waivers.flatMap((w) => [w.id, w.drop ?? ""]),
@@ -148,6 +161,7 @@ export async function computeNeeds(
       stash,
       ir,
       irSlots: { used: reserve.length, total: rules.slots },
+      seasonOut,
       players,
       asOf,
       degraded,

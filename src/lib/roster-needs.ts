@@ -42,7 +42,14 @@ export type RatedPlayer = {
   headline?: string | null;
   /** FantasyCalc 30-day value change — the market pricing in news. */
   trend30?: number | null;
+  injuryDetail?: string | null;
+  /** Will he play again this season? (src/lib/injury-outlook.ts) */
+  outlook?: "SEASON" | "LONG" | "RETURN";
+  outlookReason?: string | null;
 };
+
+/** Out for the year (explicit) or presumed (ACL/Achilles on IR). */
+export const seasonDone = (p: RatedPlayer) => p.outlook === "SEASON" || p.outlook === "LONG";
 
 export function rateOf(input: {
   ytdPts: number | null;
@@ -213,7 +220,8 @@ export function waiverIdeas(args: {
   const dropPool = mine
     .map((id) => byId.get(id))
     .filter((p): p is RatedPlayer => !!p && !starters.has(p.id) && !reserve.includes(p.id) && !holds.has(p.id))
-    .sort((a, b) => (a.value ?? 0) - (b.value ?? 0) || a.rate - b.rate);
+    // Season-over bench players are dead roster spots: cut them first.
+    .sort((a, b) => Number(seasonDone(b)) - Number(seasonDone(a)) || (a.value ?? 0) - (b.value ?? 0) || a.rate - b.rate);
 
   const ideas: WaiverIdea[] = [];
   for (const fa of freeAgents) {
@@ -281,13 +289,13 @@ export function stashIdeas(args: {
   };
   const out: StashIdea[] = [];
   for (const p of minePlayers) {
-    if (!isSidelined(p) || !p.ifBack) continue;
+    if (!isSidelined(p) || !p.ifBack || seasonDone(p)) continue;
     const gainIfBack = gainIf(p);
     if (gainIfBack < 1) continue;
     out.push({ id: p.id, kind: "HOLD", where: reserve.includes(p.id) ? "ir" : "bench", ifBack: p.ifBack, gainIfBack, bidNow: null, bidLater: null });
   }
   for (const p of freeAgents) {
-    if (!isSidelined(p) || !p.ifBack) continue;
+    if (!isSidelined(p) || !p.ifBack || seasonDone(p)) continue;
     const signal = (p.newsCount ?? 0) > 0 || (p.trend30 ?? 0) > 0;
     if (!signal) continue;
     const gainIfBack = gainIf(p);
@@ -343,7 +351,7 @@ export function tradeIdeas(args: {
   const myBase = lineupRate(rosterPositions, me.players, byId);
   const myPool = me.players
     .map((id) => byId.get(id))
-    .filter((p): p is RatedPlayer => !!p && (SKILL_POS as readonly string[]).includes(p.pos) && (p.value ?? 0) > 0)
+    .filter((p): p is RatedPlayer => !!p && (SKILL_POS as readonly string[]).includes(p.pos) && (p.value ?? 0) > 0 && !seasonDone(p))
     .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
     .slice(0, 12);
   const packages: RatedPlayer[][] = [];
@@ -360,7 +368,7 @@ export function tradeIdeas(args: {
     for (const tid of other.players) {
       const t = byId.get(tid);
       if (!t || !(SKILL_POS as readonly string[]).includes(t.pos) || !(t.value && t.value > 0)) continue;
-      if (t.injury && LONG_TERM.has(t.injury)) continue;
+      if ((t.injury && LONG_TERM.has(t.injury)) || seasonDone(t)) continue;
       const addOnly = lineupRate(rosterPositions, [...me.players, tid], byId) - myBase;
       if (addOnly < 1) continue;
 

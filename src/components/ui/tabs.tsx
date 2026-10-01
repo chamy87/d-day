@@ -50,6 +50,8 @@ export function Tabs({ items, value, onChange, size = "md", style }: TabsProps) 
               color: on ? "var(--accent)" : "var(--text-muted)",
               boxShadow: on ? "0 1px 4px rgba(0,0,0,.4)" : "none",
               transition: "all var(--dur-fast)",
+              whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
           >
             {item}

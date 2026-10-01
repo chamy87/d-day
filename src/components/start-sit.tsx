@@ -31,6 +31,16 @@ export function agoShort(iso: string | null | undefined): string {
 
 const injuryTone = (s: string | null | undefined) => (s === "Q" ? "warn" : "reach") as "warn" | "reach";
 
+/** "OUT FOR SEASON" tag when the injury outlook says he won't play again this year. */
+export function SeasonTag({ p }: { p: { outlook?: string; outlookReason?: string | null } }) {
+  if (p.outlook !== "SEASON" && p.outlook !== "LONG") return null;
+  return (
+    <span title={p.outlookReason ?? undefined}>
+      <Tag tone="reach">{p.outlook === "SEASON" ? "OUT FOR SEASON" : "LIKELY OUT FOR SEASON"}</Tag>
+    </span>
+  );
+}
+
 function GameLine({ p }: { p: DashboardPlayer }) {
   if (p.onBye) return <span style={{ color: "var(--reach)" }}>BYE</span>;
   if (!p.game) return <span>{p.team ?? "FA"}</span>;
@@ -253,6 +263,7 @@ export function StartSit({
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Tag tone={injuryTone(p.injury)}>{p.injury}</Tag>
             <b style={{ fontSize: 13 }}>{p.name}</b>
+            <SeasonTag p={p} />
             <span style={{ fontSize: 11, color: "var(--text-faint)" }}>
               {p.pos} · {starterSet.has(p.id) ? "starting" : roster.reserve.includes(p.id) ? "IR slot" : "bench"}
             </span>
@@ -262,6 +273,14 @@ export function StartSit({
               {p.injuryDetail && <span style={{ color: "var(--text-body)" }}>{p.injuryDetail}. </span>}
               {p.injuryComment}
               {p.injuryCommentAt && <span style={{ color: "var(--text-faint)" }}> · {agoShort(p.injuryCommentAt)}</span>}
+            </div>
+          )}
+          {(p.outlook === "SEASON" || p.outlook === "LONG") && (
+            <div style={{ fontSize: 12, color: "var(--reach)", marginTop: 3 }}>
+              {roster.reserve.includes(p.id)
+                ? "Not expected back this year — free to hold in the IR slot; cut only if you need the slot."
+                : "Not expected back this year — a dead bench spot. Cut, or move to an open IR slot."}
+              {p.outlookReason && <span style={{ color: "var(--text-faint)" }}> Source: “{p.outlookReason}”</span>}
             </div>
           )}
         </div>
@@ -282,6 +301,7 @@ export function StartSit({
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
               <span style={{ fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</span>
               {p.injury && <Tag tone={injuryTone(p.injury)}>{p.injury}</Tag>}
+              <SeasonTag p={p} />
             </div>
             <span style={{ fontSize: 11, color: "var(--text-faint)" }}>
               <GameLine p={p} />
@@ -309,6 +329,7 @@ export function StartSit({
               <PositionBadge pos={(p.pos as Position) ?? "BN"} size="sm" />
               <span style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>{p.name}</span>
               {p.injury ? <Tag tone={injuryTone(p.injury)}>{p.injury}</Tag> : <Tag tone="reach">HEALTHY</Tag>}
+              <SeasonTag p={p} />
             </div>
           ))}
         </>
@@ -317,13 +338,13 @@ export function StartSit({
   ) : null;
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 360px", gap: 14, alignItems: "start" }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "minmax(0, 1fr)" : "minmax(0, 1fr) 360px", gap: 14, alignItems: "start" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
         {isMobile && decisions}
         {slotsCard}
         {!isMobile && benchCard}
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
         {!isMobile && decisions}
         {injuryCard}
         {side}
